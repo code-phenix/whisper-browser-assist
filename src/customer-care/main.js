@@ -459,12 +459,26 @@ async function loadWhisperModel() {
                     addDebugLog(`Final transcription result: "${result.text}"`, 'INFO');
                     addVoiceTranscript(result.text, false); // Add final transcript
                     currentInterimText = '';
+                    
+                    // For continuous mode, also update the live speech display
+                    const liveSpeechElement = document.getElementById('live-speech');
+                    if (liveSpeechElement) {
+                        liveSpeechElement.textContent = result.text;
+                        liveSpeechElement.style.color = 'green'; // Final result in green
+                    }
                 } else {
                     // Only update interim if text has changed significantly
                     if (currentInterimText !== result.text) {
                         addDebugLog(`Interim transcription: "${result.text}"`, 'DEBUG');
                         addVoiceTranscript(result.text, true); // Add interim transcript
                         currentInterimText = result.text;
+                        
+                        // Update live speech display for interim results
+                        const liveSpeechElement = document.getElementById('live-speech');
+                        if (liveSpeechElement) {
+                            liveSpeechElement.textContent = result.text;
+                            liveSpeechElement.style.color = 'blue'; // Interim result in blue
+                        }
                     }
                 }
                 updateUI();
@@ -797,7 +811,7 @@ function updateUI() {
     
     if (statusElement) {
         if (isListening) {
-            statusElement.textContent = 'Listening for speech';
+            statusElement.textContent = '🔄 Continuous Listening';
         } else {
             statusElement.textContent = 'Idle';
         }
@@ -913,7 +927,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     </div>
                     <div id="voice-transcript-section" class="voice-transcript-section">
                         <div class="voice-transcript-header">
-                            <div class="voice-transcript-title">Voice Transcript</div>
+                            <div class="voice-transcript-title">📝 Continuous Voice Transcript</div>
                             <button id="clear-transcript-btn" class="clear-transcript-btn" title="Clear transcript">🗑️</button>
                         </div>
                         <div id="voice-transcript" class="voice-transcript-content"></div>
