@@ -1,0 +1,214 @@
+{
+  "returns": [
+    {
+      "returnId": "RET-2024-001",
+      "orderId": "ORD-2024-001",
+      "requestDate": "2024-12-23T14:30:00Z",
+      "status": "approved",
+      "type": "return",
+      "reason": "wrong-size",
+      "description": "The T-shirt is too small for me. I need a larger size.",
+      "items": [
+        {
+          "itemId": "ITEM-001",
+          "name": "Blue T-Shirt",
+          "size": "M",
+          "color": "Blue",
+          "price": 29.99,
+          "quantity": 1,
+          "returnReason": "wrong-size"
+        }
+      ],
+      "refundAmount": 29.99,
+      "refundMethod": "original_payment",
+      "timeline": [
+        {
+          "step": "request_submitted",
+          "date": "2024-12-23T14:30:00Z",
+          "description": "Return request submitted"
+        },
+        {
+          "step": "request_approved",
+          "date": "2024-12-23T16:45:00Z",
+          "description": "Return request approved"
+        },
+        {
+          "step": "label_sent",
+          "date": "2024-12-23T17:30:00Z",
+          "description": "Return shipping label sent"
+        },
+        {
+          "step": "item_received",
+          "date": "2024-12-26T10:15:00Z",
+          "description": "Returned item received"
+        },
+        {
+          "step": "refund_processed",
+          "date": "2024-12-26T14:20:00Z",
+          "description": "Refund processed"
+        }
+      ],
+      "shippingLabel": {
+        "trackingNumber": "RET-123456789",
+        "carrier": "FedEx",
+        "status": "delivered"
+      }
+    },
+    {
+      "returnId": "RET-2024-002",
+      "orderId": "ORD-2024-002",
+      "requestDate": "2024-12-19T11:20:00Z",
+      "status": "in_transit",
+      "type": "replacement",
+      "reason": "defective",
+      "description": "The wireless headphones are not working properly. The sound quality is poor and they keep disconnecting.",
+      "items": [
+        {
+          "itemId": "ITEM-002",
+          "name": "Wireless Headphones",
+          "brand": "AudioTech",
+          "price": 89.99,
+          "quantity": 1,
+          "returnReason": "defective"
+        }
+      ],
+      "replacementOrderId": "ORD-2024-004",
+      "timeline": [
+        {
+          "step": "request_submitted",
+          "date": "2024-12-19T11:20:00Z",
+          "description": "Replacement request submitted"
+        },
+        {
+          "step": "request_approved",
+          "date": "2024-12-19T13:15:00Z",
+          "description": "Replacement request approved"
+        },
+        {
+          "step": "replacement_ordered",
+          "date": "2024-12-19T13:30:00Z",
+          "description": "Replacement item ordered"
+        },
+        {
+          "step": "label_sent",
+          "date": "2024-12-19T14:00:00Z",
+          "description": "Return shipping label sent"
+        },
+        {
+          "step": "item_shipped",
+          "date": "2024-12-20T09:30:00Z",
+          "description": "Defective item shipped back"
+        }
+      ],
+      "shippingLabel": {
+        "trackingNumber": "RET-987654321",
+        "carrier": "UPS",
+        "status": "in_transit"
+      }
+    }
+  ],
+  "replacements": [
+    {
+      "replacementId": "REP-2024-001",
+      "originalReturnId": "RET-2024-002",
+      "orderId": "ORD-2024-004",
+      "requestDate": "2024-12-19T13:30:00Z",
+      "status": "shipped",
+      "originalItem": {
+        "itemId": "ITEM-002",
+        "name": "Wireless Headphones",
+        "brand": "AudioTech",
+        "price": 89.99
+      },
+      "replacementItem": {
+        "itemId": "ITEM-008",
+        "name": "Wireless Headphones Pro",
+        "brand": "AudioTech",
+        "price": 89.99,
+        "upgrade": true
+      },
+      "shipping": {
+        "method": "Express",
+        "trackingNumber": "TRK-111222333",
+        "carrier": "FedEx",
+        "estimatedDelivery": "2024-12-27T00:00:00Z"
+      },
+      "timeline": [
+        {
+          "step": "replacement_ordered",
+          "date": "2024-12-19T13:30:00Z",
+          "description": "Replacement item ordered"
+        },
+        {
+          "step": "item_processed",
+          "date": "2024-12-20T10:15:00Z",
+          "description": "Replacement item processed"
+        },
+        {
+          "step": "item_shipped",
+          "date": "2024-12-20T14:30:00Z",
+          "description": "Replacement item shipped"
+        }
+      ]
+    }
+  ],
+  "returnReasons": [
+    {
+      "id": "wrong-size",
+      "name": "Wrong Size",
+      "description": "Item doesn't fit properly"
+    },
+    {
+      "id": "defective",
+      "name": "Defective Item",
+      "description": "Item is not working or damaged"
+    },
+    {
+      "id": "not-as-described",
+      "name": "Not as Described",
+      "description": "Item doesn't match the description"
+    },
+    {
+      "id": "changed-mind",
+      "name": "Changed My Mind",
+      "description": "No longer want the item"
+    },
+    {
+      "id": "duplicate-order",
+      "name": "Duplicate Order",
+      "description": "Accidentally ordered twice"
+    },
+    {
+      "id": "other",
+      "name": "Other",
+      "description": "Other reason not listed"
+    }
+  ],
+  "defectTypes": [
+    {
+      "id": "physical-damage",
+      "name": "Physical Damage",
+      "description": "Item arrived damaged"
+    },
+    {
+      "id": "not-working",
+      "name": "Not Working",
+      "description": "Item doesn't function properly"
+    },
+    {
+      "id": "missing-parts",
+      "name": "Missing Parts",
+      "description": "Some parts are missing"
+    },
+    {
+      "id": "wrong-item",
+      "name": "Wrong Item Received",
+      "description": "Received different item than ordered"
+    },
+    {
+      "id": "quality-issue",
+      "name": "Quality Issue",
+      "description": "Poor quality or manufacturing defect"
+    }
+  ]
+} 

@@ -1,0 +1,169 @@
+{
+  "customer": {
+    "id": "CUST-2024-001",
+    "name": "John Smith",
+    "email": "john.smith@email.com",
+    "phone": "+1-555-0123",
+    "address": {
+      "street": "123 Main Street",
+      "city": "New York",
+      "state": "NY",
+      "zipCode": "10001",
+      "country": "USA"
+    },
+    "preferences": {
+      "language": "en",
+      "timezone": "America/New_York",
+      "notifications": {
+        "email": true,
+        "sms": false,
+        "push": true
+      }
+    }
+  },
+  "orders": [
+    {
+      "orderId": "ORD-2024-001",
+      "orderDate": "2024-12-20T10:30:00Z",
+      "status": "delivered",
+      "totalAmount": 299.97,
+      "shippingAddress": {
+        "street": "123 Main Street",
+        "city": "New York",
+        "state": "NY",
+        "zipCode": "10001",
+        "country": "USA"
+      },
+      "items": [
+        {
+          "itemId": "ITEM-001",
+          "name": "Blue T-Shirt",
+          "size": "M",
+          "color": "Blue",
+          "price": 29.99,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/0066cc/ffffff?text=T-Shirt",
+          "category": "Clothing"
+        },
+        {
+          "itemId": "ITEM-002",
+          "name": "Wireless Headphones",
+          "brand": "AudioTech",
+          "price": 89.99,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/333333/ffffff?text=Headphones",
+          "category": "Electronics"
+        },
+        {
+          "itemId": "ITEM-003",
+          "name": "Smart Watch",
+          "brand": "TechWear",
+          "price": 199.99,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/666666/ffffff?text=Smart+Watch",
+          "category": "Electronics"
+        }
+      ],
+      "shipping": {
+        "method": "Express",
+        "trackingNumber": "TRK-123456789",
+        "carrier": "FedEx",
+        "deliveryDate": "2024-12-22T14:30:00Z"
+      },
+      "payment": {
+        "method": "Credit Card",
+        "last4": "1234",
+        "status": "paid"
+      }
+    },
+    {
+      "orderId": "ORD-2024-002",
+      "orderDate": "2024-12-15T15:45:00Z",
+      "status": "delivered",
+      "totalAmount": 149.98,
+      "shippingAddress": {
+        "street": "123 Main Street",
+        "city": "New York",
+        "state": "NY",
+        "zipCode": "10001",
+        "country": "USA"
+      },
+      "items": [
+        {
+          "itemId": "ITEM-004",
+          "name": "Running Shoes",
+          "brand": "SportFlex",
+          "size": "10",
+          "color": "Black",
+          "price": 79.99,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/000000/ffffff?text=Running+Shoes",
+          "category": "Footwear"
+        },
+        {
+          "itemId": "ITEM-005",
+          "name": "Yoga Mat",
+          "brand": "FitLife",
+          "price": 29.99,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/4CAF50/ffffff?text=Yoga+Mat",
+          "category": "Fitness"
+        },
+        {
+          "itemId": "ITEM-006",
+          "name": "Water Bottle",
+          "brand": "HydraTech",
+          "price": 19.99,
+          "quantity": 2,
+          "image": "https://via.placeholder.com/150x200/2196F3/ffffff?text=Water+Bottle",
+          "category": "Fitness"
+        }
+      ],
+      "shipping": {
+        "method": "Standard",
+        "trackingNumber": "TRK-987654321",
+        "carrier": "UPS",
+        "deliveryDate": "2024-12-18T11:15:00Z"
+      },
+      "payment": {
+        "method": "PayPal",
+        "status": "paid"
+      }
+    },
+    {
+      "orderId": "ORD-2024-003",
+      "orderDate": "2024-12-10T09:20:00Z",
+      "status": "processing",
+      "totalAmount": 89.97,
+      "shippingAddress": {
+        "street": "123 Main Street",
+        "city": "New York",
+        "state": "NY",
+        "zipCode": "10001",
+        "country": "USA"
+      },
+      "items": [
+        {
+          "itemId": "ITEM-007",
+          "name": "Coffee Maker",
+          "brand": "BrewMaster",
+          "price": 89.97,
+          "quantity": 1,
+          "image": "https://via.placeholder.com/150x200/8D6E63/ffffff?text=Coffee+Maker",
+          "category": "Home & Kitchen"
+        }
+      ],
+      "shipping": {
+        "method": "Standard",
+        "trackingNumber": "TRK-456789123",
+        "carrier": "USPS",
+        "estimatedDelivery": "2024-12-25T00:00:00Z"
+      },
+      "payment": {
+        "method": "Credit Card",
+        "last4": "5678",
+        "status": "paid"
+      }
+    }
+  ]
+} 
