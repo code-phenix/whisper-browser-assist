@@ -10,12 +10,15 @@ class WhisperModule {
         this.audioChunks = [];
         this.debugLog = [];
         this.speechRecognition = null;
-        this.isLiveTranscribing = false;
+        this._isLiveTranscribing = false;
         this.finalTranscript = '';
         this.interimTranscript = '';
+        this.audioStream = null;
+        this.errorCount = 0;
+        this.lastErrorTime = 0;
         this.addDebugLog('WhisperModule constructor called', 'DEBUG');
         
-        // Initialize main speech recognition for commands (no wake word needed)
+        // Initialize main speech recognition for transcription only
         this.initSpeechRecognition();
     }
 
@@ -31,77 +34,43 @@ class WhisperModule {
         }
     }
 
-    initWakeWordRecognition() {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (SpeechRecognition) {
-            this.wakeWordRecognition = new SpeechRecognition();
-            this.wakeWordRecognition.continuous = false; // Changed to false for better stability
-            this.wakeWordRecognition.interimResults = false; // Changed to false for wake word detection
-            this.wakeWordRecognition.lang = 'en-US';
-            this.wakeWordRecognition.maxAlternatives = 1;
+    async requestMicrophonePermission() {
+        try {
+            this.addDebugLog('Requesting microphone permission...', 'DEBUG');
+            this.audioStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true,
+                    sampleRate: 16000,
+                    channelCount: 1,
+                    latency: 0.01
+                },
+                video: false
+            });
             
-            this.wakeWordRecognition.onstart = () => {
-                this.addDebugLog('Wake word detection started', 'INFO');
-            };
+            // Test the audio stream to ensure it's working
+            const audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(this.audioStream);
+            const analyser = audioContext.createAnalyser();
+            source.connect(analyser);
             
-            this.wakeWordRecognition.onresult = (event) => {
-                if (event.results.length > 0) {
-                    const transcript = event.results[0][0].transcript.toLowerCase().trim();
-                    this.addDebugLog(`Wake word check: "${transcript}"`, 'DEBUG');
-                    
-                    if (transcript.includes(this.wakeWord)) {
-                        this.addDebugLog('Wake word detected! Starting command mode...', 'INFO');
-                        this.activateCommandMode();
-                        return;
-                    }
-                }
-                
-                // If no wake word detected, restart after a short delay
-                if (this.isWakeWordMode) {
-                    setTimeout(() => {
-                        if (this.isWakeWordMode) {
-                            try { 
-                                this.wakeWordRecognition.start(); 
-                            } catch (e) { 
-                                this.addDebugLog('Failed to restart wake word detection: ' + e.message, 'ERROR');
-                            }
-                        }
-                    }, 500); // Increased delay for better stability
-                }
-            };
+            // Check if we're getting audio data
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
             
-            this.wakeWordRecognition.onerror = (event) => {
-                this.addDebugLog('Wake word recognition error: ' + event.error, 'ERROR');
-                
-                // Only restart if it's not a user-initiated stop
-                if (this.isWakeWordMode && event.error !== 'aborted') {
-                    setTimeout(() => {
-                        if (this.isWakeWordMode) {
-                            try { 
-                                this.wakeWordRecognition.start(); 
-                            } catch (e) { 
-                                this.addDebugLog('Failed to restart after error: ' + e.message, 'ERROR');
-                            }
-                        }
-                    }, 1000); // Longer delay after errors
-                }
-            };
+            // If we get any non-zero values, the microphone is working
+            const hasAudio = dataArray.some(value => value > 0);
+            this.addDebugLog(`Microphone permission granted - Audio detected: ${hasAudio}`, 'INFO');
             
-            this.wakeWordRecognition.onend = () => {
-                // Only restart if we're still in wake word mode and it wasn't manually stopped
-                if (this.isWakeWordMode) {
-                    this.addDebugLog('Wake word detection ended, restarting...', 'DEBUG');
-                    setTimeout(() => {
-                        if (this.isWakeWordMode) {
-                            try { 
-                                this.wakeWordRecognition.start(); 
-                            } catch (e) { 
-                                this.addDebugLog('Failed to restart wake word detection: ' + e.message, 'ERROR');
-                            }
-                        }
-                    }, 500);
-                }
-            };
+            // Clean up the test
+            source.disconnect();
+            audioContext.close();
+            
+            return true;
+        } catch (error) {
+            this.addDebugLog(`Microphone permission denied: ${error.message}`, 'ERROR');
+            return false;
         }
     }
 
@@ -109,14 +78,21 @@ class WhisperModule {
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
         if (SpeechRecognition) {
             this.speechRecognition = new SpeechRecognition();
-            this.speechRecognition.continuous = false; // Changed back to false for better stability
+            this.speechRecognition.continuous = true; // Changed to true for better continuous recognition
             this.speechRecognition.interimResults = true;
             this.speechRecognition.lang = 'en-US';
             this.speechRecognition.maxAlternatives = 1;
             
+            // Add additional configuration for better recognition
+            if (this.speechRecognition.grammars) {
+                // Add grammar if supported
+                this.addDebugLog('Speech recognition grammar support available', 'DEBUG');
+            }
+            
+            // Add better error handling and restart logic
             this.speechRecognition.onstart = () => {
-                this.isLiveTranscribing = true;
-                this.addDebugLog('Voice recognition started - listening for commands', 'INFO');
+                this._isLiveTranscribing = true;
+                this.addDebugLog('Voice recognition started - listening for speech', 'INFO');
             };
             
             this.speechRecognition.onresult = (event) => {
@@ -138,7 +114,7 @@ class WhisperModule {
                     document.dispatchEvent(new CustomEvent('whisperResult', {
                         detail: {
                             text: interimTranscript,
-                            action: '',
+                            action: 'transcript',
                             param: null,
                             confidence: 0.5,
                             timestamp: new Date().toISOString(),
@@ -149,36 +125,94 @@ class WhisperModule {
                 
                 if (finalTranscript) {
                     this.addDebugLog(`Final transcript: "${finalTranscript}" (confidence: ${event.results[event.results.length - 1][0].confidence})`, 'INFO');
-                    this.processCommand(finalTranscript);
+                    // Dispatch final result event
+                    document.dispatchEvent(new CustomEvent('whisperResult', {
+                        detail: {
+                            text: finalTranscript,
+                            action: 'transcript',
+                            param: null,
+                            confidence: event.results[event.results.length - 1][0].confidence,
+                            timestamp: new Date().toISOString(),
+                            isFinal: true
+                        }
+                    }));
                 }
             };
             
             this.speechRecognition.onerror = (event) => {
-                this.isLiveTranscribing = false;
+                this._isLiveTranscribing = false;
                 this.addDebugLog('Voice recognition error: ' + event.error, 'ERROR');
                 
-                // Only restart for certain errors, not for no-speech or aborted
-                if (event.error !== 'aborted' && event.error !== 'no-speech') {
-                    setTimeout(() => {
-                        this.restartRecognition();
-                    }, 2000); // Longer delay after errors
-                } else if (event.error === 'no-speech') {
-                    // For no-speech, restart after a longer delay
-                    setTimeout(() => {
-                        this.restartRecognition();
-                    }, 3000);
+                // Track error frequency
+                const now = Date.now();
+                if (now - this.lastErrorTime < 10000) { // Within 10 seconds
+                    this.errorCount++;
+                } else {
+                    this.errorCount = 1;
+                }
+                this.lastErrorTime = now;
+                
+                // If we have too many errors in a short time, run diagnosis
+                if (this.errorCount >= 3) {
+                    this.addDebugLog('Too many errors detected, running diagnosis...', 'WARN');
+                    this.diagnoseRecognitionIssue().then(diagnosis => {
+                        this.addDebugLog(`Diagnosis: ${diagnosis.issue} - ${diagnosis.message}`, 'ERROR');
+                    });
+                    this.errorCount = 0; // Reset counter
+                }
+                
+                // Handle different error types
+                if (event.error === 'no-speech') {
+                    this.addDebugLog('No speech detected - this is normal, continuing to listen', 'DEBUG');
+                    // For no-speech, don't restart immediately - let the continuous mode handle it
+                    // The continuous mode should keep listening without needing to restart
+                } else if (event.error === 'aborted') {
+                    this.addDebugLog('Recognition aborted by user', 'DEBUG');
+                    // Don't restart if aborted by user
+                } else if (event.error === 'audio-capture') {
+                    this.addDebugLog('Audio capture error - microphone may not be available', 'ERROR');
+                    // Try to restart after a longer delay for audio issues
+                    if (this.isRecording) {
+                        setTimeout(() => {
+                            if (this.isRecording && !this._isLiveTranscribing) {
+                                this.restartRecognition();
+                            }
+                        }, 5000);
+                    }
+                } else if (event.error === 'network') {
+                    this.addDebugLog('Network error - speech recognition service unavailable', 'ERROR');
+                    // Try to restart after a delay for network issues
+                    if (this.isRecording) {
+                        setTimeout(() => {
+                            if (this.isRecording && !this._isLiveTranscribing) {
+                                this.restartRecognition();
+                            }
+                        }, 4000);
+                    }
+                } else {
+                    this.addDebugLog(`Unknown error: ${event.error}`, 'ERROR');
+                    // Restart for unknown errors
+                    if (this.isRecording) {
+                        setTimeout(() => {
+                            if (this.isRecording && !this._isLiveTranscribing) {
+                                this.restartRecognition();
+                            }
+                        }, 3000);
+                    }
                 }
             };
             
             this.speechRecognition.onend = () => {
-                this.isLiveTranscribing = false;
+                this._isLiveTranscribing = false;
                 this.addDebugLog('Voice recognition ended', 'INFO');
                 
                 // Only restart if we're still supposed to be recording
                 if (this.isRecording) {
                     setTimeout(() => {
-                        this.restartRecognition();
-                    }, 2000); // Longer delay for stability
+                        if (this.isRecording && !this._isLiveTranscribing) {
+                            this.restartRecognition();
+                        }
+                    }, 1500); // Slightly longer delay for normal end
                 } else {
                     this.addDebugLog('Not restarting - recording was stopped by user', 'DEBUG');
                 }
@@ -187,43 +221,72 @@ class WhisperModule {
     }
 
     restartRecognition() {
-        if (this.speechRecognition && !this.isLiveTranscribing) {
-            try {
-                this.speechRecognition.start();
-                this.addDebugLog('Restarting voice recognition', 'INFO');
-            } catch (e) {
-                this.addDebugLog('Failed to restart voice recognition: ' + e.message, 'ERROR');
-                // Try to stop first, then restart
-                try {
-                    this.speechRecognition.stop();
-                    this.addDebugLog('Stopped recognition before retry', 'DEBUG');
-                } catch (stopError) {
-                    this.addDebugLog('Failed to stop recognition: ' + stopError.message, 'DEBUG');
-                }
-                
-                // Only retry if we're still not transcribing
-                setTimeout(() => {
-                    if (!this.isLiveTranscribing) {
-                        try {
-                            this.speechRecognition.start();
-                            this.addDebugLog('Second attempt to restart voice recognition', 'INFO');
-                        } catch (e2) {
-                            this.addDebugLog('Second attempt failed: ' + e2.message, 'ERROR');
-                        }
-                    }
-                }, 3000);
-            }
-        } else if (this.isLiveTranscribing) {
+        if (!this.speechRecognition) {
+            this.addDebugLog('Cannot restart - speech recognition not initialized', 'ERROR');
+            return;
+        }
+        
+        if (this._isLiveTranscribing) {
             this.addDebugLog('Skipping restart - recognition already active', 'DEBUG');
+            return;
+        }
+        
+        if (!this.isRecording) {
+            this.addDebugLog('Skipping restart - not currently recording', 'DEBUG');
+            return;
+        }
+        
+        try {
+            this.speechRecognition.start();
+            this.addDebugLog('Restarting voice recognition', 'INFO');
+        } catch (e) {
+            this.addDebugLog('Failed to restart voice recognition: ' + e.message, 'ERROR');
+            
+            // Try to stop first, then restart
+            try {
+                this.speechRecognition.stop();
+                this.addDebugLog('Stopped recognition before retry', 'DEBUG');
+            } catch (stopError) {
+                this.addDebugLog('Failed to stop recognition: ' + stopError.message, 'DEBUG');
+            }
+            
+            // Retry after a delay
+            setTimeout(() => {
+                if (!this._isLiveTranscribing && this.isRecording) {
+                    try {
+                        this.speechRecognition.start();
+                        this.addDebugLog('Second attempt to restart voice recognition', 'INFO');
+                    } catch (e2) {
+                        this.addDebugLog('Second attempt failed: ' + e2.message, 'ERROR');
+                        
+                        // If second attempt fails, try one more time after a longer delay
+                        setTimeout(() => {
+                            if (!this._isLiveTranscribing && this.isRecording) {
+                                try {
+                                    this.speechRecognition.start();
+                                    this.addDebugLog('Third attempt to restart voice recognition', 'INFO');
+                                } catch (e3) {
+                                    this.addDebugLog('Third attempt failed: ' + e3.message, 'ERROR');
+                                    this.addDebugLog('Giving up on restart attempts', 'ERROR');
+                                }
+                            }
+                        }, 5000);
+                    }
+                }
+            }, 2000);
         }
     }
-
-    // Wake word functions removed - voice recognition works directly now
 
     async init() {
         this.addDebugLog('Initializing WhisperModule...', 'DEBUG');
         
         try {
+            // Request microphone permission first
+            const hasPermission = await this.requestMicrophonePermission();
+            if (!hasPermission) {
+                throw new Error('Microphone permission denied');
+            }
+            
             // Initialize speech recognition if available
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             if (!SpeechRecognition) {
@@ -243,135 +306,6 @@ class WhisperModule {
         }
     }
 
-    processCommand(transcript) {
-        const lowerTranscript = transcript.toLowerCase();
-        this.addDebugLog(`Processing command: "${transcript}"`, 'DEBUG');
-        
-        // Define command patterns for customer care website
-        const commands = [
-            // Navigation commands - handle both singular and plural forms
-            { pattern: /go to return/i, action: 'navigate', param: 'returns' },
-            { pattern: /go to returns/i, action: 'navigate', param: 'returns' },
-            { pattern: /go to replacement/i, action: 'navigate', param: 'replacements' },
-            { pattern: /go to replacements/i, action: 'navigate', param: 'replacements' },
-            { pattern: /go to track/i, action: 'navigate', param: 'tracking' },
-            { pattern: /go to tracking/i, action: 'navigate', param: 'tracking' },
-            { pattern: /go to status/i, action: 'navigate', param: 'tracking' },
-            { pattern: /go to contact/i, action: 'navigate', param: 'contact' },
-            { pattern: /go to support/i, action: 'navigate', param: 'contact' },
-            { pattern: /go to help/i, action: 'navigate', param: 'contact' },
-            
-            { pattern: /show return/i, action: 'navigate', param: 'returns' },
-            { pattern: /show returns/i, action: 'navigate', param: 'returns' },
-            { pattern: /show replacement/i, action: 'navigate', param: 'replacements' },
-            { pattern: /show replacements/i, action: 'navigate', param: 'replacements' },
-            { pattern: /show track/i, action: 'navigate', param: 'tracking' },
-            { pattern: /show tracking/i, action: 'navigate', param: 'tracking' },
-            { pattern: /show status/i, action: 'navigate', param: 'tracking' },
-            { pattern: /show contact/i, action: 'navigate', param: 'contact' },
-            { pattern: /show support/i, action: 'navigate', param: 'contact' },
-            { pattern: /show help/i, action: 'navigate', param: 'contact' },
-            
-            { pattern: /open return/i, action: 'navigate', param: 'returns' },
-            { pattern: /open returns/i, action: 'navigate', param: 'returns' },
-            { pattern: /open replacement/i, action: 'navigate', param: 'replacements' },
-            { pattern: /open replacements/i, action: 'navigate', param: 'replacements' },
-            { pattern: /open track/i, action: 'navigate', param: 'tracking' },
-            { pattern: /open tracking/i, action: 'navigate', param: 'tracking' },
-            { pattern: /open status/i, action: 'navigate', param: 'tracking' },
-            { pattern: /open contact/i, action: 'navigate', param: 'contact' },
-            { pattern: /open support/i, action: 'navigate', param: 'contact' },
-            { pattern: /open help/i, action: 'navigate', param: 'contact' },
-            
-            // Form actions
-            { pattern: /submit form/i, action: 'submit_form' },
-            { pattern: /submit return/i, action: 'submit_return' },
-            { pattern: /submit replacement/i, action: 'submit_replacement' },
-            { pattern: /track request/i, action: 'track_request' },
-            { pattern: /check status/i, action: 'track_request' },
-            
-            // Button clicks
-            { pattern: /click (.+)/i, action: 'click', param: '$1' },
-            { pattern: /press (.+)/i, action: 'click', param: '$1' },
-            { pattern: /select (.+)/i, action: 'click', param: '$1' },
-            
-            // Scrolling
-            { pattern: /scroll down/i, action: 'scroll_down' },
-            { pattern: /scroll up/i, action: 'scroll_up' },
-            { pattern: /go down/i, action: 'scroll_down' },
-            { pattern: /go up/i, action: 'scroll_up' },
-            { pattern: /move down/i, action: 'scroll_down' },
-            { pattern: /move up/i, action: 'scroll_up' },
-            
-            // Reading
-            { pattern: /read page/i, action: 'read_page' },
-            { pattern: /read content/i, action: 'read_page' },
-            { pattern: /read this/i, action: 'read_page' },
-            
-            // Voice control
-            { pattern: /start listening/i, action: 'start_listening' },
-            { pattern: /stop listening/i, action: 'stop_listening' },
-            { pattern: /start recording/i, action: 'start_listening' },
-            { pattern: /stop recording/i, action: 'stop_listening' },
-            
-            // Customer service specific
-            { pattern: /call support/i, action: 'call_support' },
-            { pattern: /contact support/i, action: 'contact_support' },
-            { pattern: /live chat/i, action: 'live_chat' },
-            { pattern: /send email/i, action: 'send_email' },
-            { pattern: /help me/i, action: 'help' },
-            { pattern: /i need help/i, action: 'help' },
-            
-            // Form filling helpers
-            { pattern: /fill order number (.+)/i, action: 'fill_field', param: 'orderNumber:$1' },
-            { pattern: /fill email (.+)/i, action: 'fill_field', param: 'email:$1' },
-            { pattern: /reason (.+)/i, action: 'fill_field', param: 'returnReason:$1' },
-            { pattern: /defect (.+)/i, action: 'fill_field', param: 'defectType:$1' }
-        ];
-        
-        // Check for matches
-        for (const command of commands) {
-            const match = transcript.match(command.pattern);
-            if (match) {
-                let param = null;
-                if (command.param && match[1]) {
-                    param = match[1].trim();
-                }
-                
-                this.addDebugLog(`Command matched: ${command.action}${param ? ` with param: "${param}"` : ''}`, 'INFO');
-                
-                // Trigger the command event
-                const event = new CustomEvent('whisperResult', { 
-                    detail: {
-                        text: transcript,
-                        action: command.action,
-                        param: param,
-                        confidence: 0.9,
-                        timestamp: new Date().toISOString(),
-                        isFinal: true
-                    }
-                });
-                document.dispatchEvent(event);
-                return;
-            }
-        }
-        
-        // No command matched
-        this.addDebugLog(`No command pattern matched: "${transcript}"`, 'WARN');
-        
-        // Still trigger event for unrecognized commands
-        const event = new CustomEvent('whisperResult', { 
-            detail: {
-                text: transcript,
-                action: 'unknown',
-                confidence: 0.9,
-                timestamp: new Date().toISOString(),
-                isFinal: true
-            }
-        });
-        document.dispatchEvent(event);
-    }
-
     async startRecording() {
         this.addDebugLog('startRecording called', 'DEBUG');
         if (!this.isInitialized) {
@@ -385,24 +319,44 @@ class WhisperModule {
             return;
         }
         
+        // Ensure we have microphone permission and test it
+        if (!this.audioStream) {
+            this.addDebugLog('No audio stream available, requesting permission...', 'DEBUG');
+            const hasPermission = await this.requestMicrophonePermission();
+            if (!hasPermission) {
+                this.addDebugLog('Cannot start recording - microphone permission denied', 'ERROR');
+                return;
+            }
+        }
+        
+        // Test microphone before starting recognition
+        const micTest = await this.testMicrophone();
+        if (!micTest.working) {
+            this.addDebugLog(`Microphone test failed: ${micTest.error}`, 'ERROR');
+            return;
+        }
+        
         this.isRecording = true;
         this.addDebugLog('Recording started', 'INFO');
         
         // Start voice recognition directly
-        if (this.speechRecognition && !this.isLiveTranscribing) {
+        if (this.speechRecognition && !this._isLiveTranscribing) {
             this.addDebugLog('Starting voice recognition...', 'DEBUG');
             try {
                 this.speechRecognition.start();
             } catch (e) {
                 this.addDebugLog('Voice recognition already started or failed: ' + e.message, 'WARN');
-                // Reset recording state if start failed
-                this.isRecording = false;
+                // Don't reset recording state, let the error handler deal with it
+                // this.isRecording = false;
             }
-        } else if (this.isLiveTranscribing) {
+        } else if (this._isLiveTranscribing) {
             this.addDebugLog('Voice recognition already active - skipping start', 'DEBUG');
+        } else {
+            this.addDebugLog('Speech recognition not available', 'ERROR');
+            this.isRecording = false;
         }
         
-        console.log('🎤 Voice recognition started - speak commands directly!');
+        console.log('🎤 Voice recognition started - speak to see transcription!');
     }
 
     async stopRecording() {
@@ -416,7 +370,7 @@ class WhisperModule {
         this.isRecording = false;
         
         // Stop voice recognition
-        if (this.speechRecognition && this.isLiveTranscribing) {
+        if (this.speechRecognition && this._isLiveTranscribing) {
             try {
                 this.speechRecognition.stop();
                 this.addDebugLog('Voice recognition stopped', 'INFO');
@@ -425,14 +379,148 @@ class WhisperModule {
             }
         }
         
-        this.isLiveTranscribing = false;
+        this._isLiveTranscribing = false;
+        
+        // Stop audio stream if it exists
+        if (this.audioStream) {
+            try {
+                this.audioStream.getTracks().forEach(track => track.stop());
+                this.addDebugLog('Audio stream stopped', 'DEBUG');
+            } catch (e) {
+                this.addDebugLog('Failed to stop audio stream: ' + e.message, 'WARN');
+            }
+            this.audioStream = null;
+        }
         
         this.addDebugLog('Recording stopped', 'INFO');
         console.log('🛑 Recording stopped');
     }
 
+    forceRestart() {
+        this.addDebugLog('Force restarting voice recognition', 'INFO');
+        
+        // Stop current recognition if active
+        if (this.speechRecognition && this._isLiveTranscribing) {
+            try {
+                this.speechRecognition.stop();
+                this.addDebugLog('Stopped current recognition for force restart', 'DEBUG');
+            } catch (e) {
+                this.addDebugLog('Failed to stop current recognition: ' + e.message, 'WARN');
+            }
+        }
+        
+        // Reset state
+        this._isLiveTranscribing = false;
+        
+        // Restart after a short delay
+        setTimeout(() => {
+            if (this.isRecording) {
+                this.restartRecognition();
+            }
+        }, 1000);
+    }
+
     getDebugLog() {
         return this.debugLog;
+    }
+
+    get isLiveTranscribing() {
+        return this._isLiveTranscribing;
+    }
+
+    async checkMicrophoneStatus() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const audioDevices = devices.filter(device => device.kind === 'audioinput');
+            
+            if (audioDevices.length === 0) {
+                this.addDebugLog('No microphone devices found', 'WARN');
+                return { available: false, message: 'No microphone devices found' };
+            }
+            
+            this.addDebugLog(`Found ${audioDevices.length} microphone device(s)`, 'INFO');
+            return { available: true, devices: audioDevices };
+        } catch (error) {
+            this.addDebugLog(`Error checking microphone status: ${error.message}`, 'ERROR');
+            return { available: false, message: error.message };
+        }
+    }
+
+    async testMicrophone() {
+        try {
+            this.addDebugLog('Testing microphone functionality...', 'DEBUG');
+            
+            if (!this.audioStream) {
+                return { working: false, error: 'No audio stream available' };
+            }
+            
+            // Create audio context to test the stream
+            const audioContext = new AudioContext();
+            const source = audioContext.createMediaStreamSource(this.audioStream);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            
+            // Wait a moment for audio to be processed
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Check audio levels
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            
+            // Calculate average audio level
+            const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+            const maxLevel = Math.max(...dataArray);
+            
+            this.addDebugLog(`Microphone test - Average level: ${average.toFixed(2)}, Max level: ${maxLevel}`, 'DEBUG');
+            
+            // Clean up
+            source.disconnect();
+            audioContext.close();
+            
+            // Consider microphone working if we can detect any audio activity
+            const isWorking = maxLevel > 0 || average > 0;
+            
+            return { 
+                working: isWorking, 
+                averageLevel: average,
+                maxLevel: maxLevel,
+                error: isWorking ? null : 'No audio detected from microphone'
+            };
+            
+        } catch (error) {
+            this.addDebugLog(`Microphone test error: ${error.message}`, 'ERROR');
+            return { working: false, error: error.message };
+        }
+    }
+
+    async diagnoseRecognitionIssue() {
+        this.addDebugLog('Diagnosing recognition issues...', 'DEBUG');
+        
+        // Check microphone status
+        const micStatus = await this.checkMicrophoneStatus();
+        if (!micStatus.available) {
+            return { issue: 'microphone_not_available', message: micStatus.message };
+        }
+        
+        // Test microphone functionality
+        const micTest = await this.testMicrophone();
+        if (!micTest.working) {
+            return { issue: 'microphone_not_working', message: micTest.error };
+        }
+        
+        // Check speech recognition support
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            return { issue: 'speech_recognition_not_supported', message: 'Speech recognition not supported in this browser' };
+        }
+        
+        // Check if we have an active audio stream
+        if (!this.audioStream) {
+            return { issue: 'no_audio_stream', message: 'No active audio stream' };
+        }
+        
+        return { issue: 'unknown', message: 'All checks passed but recognition still failing' };
     }
 }
 

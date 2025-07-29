@@ -27,6 +27,7 @@ function addDebugLog(message, type = 'INFO') {
 
 // Voice transcript functionality
 let voiceTranscript = [];
+let updateTranscriptTimeout = null;
 
 function addVoiceTranscript(text, isInterim = false) {
     const timestamp = new Date().toLocaleTimeString();
@@ -49,28 +50,48 @@ function addVoiceTranscript(text, isInterim = false) {
         voiceTranscript.push(entry);
     }
     
-    // Keep only last 20 transcript entries
-    if (voiceTranscript.length > 20) {
-        voiceTranscript = voiceTranscript.slice(-20);
+    // Keep only last 15 transcript entries for better performance
+    if (voiceTranscript.length > 15) {
+        voiceTranscript = voiceTranscript.slice(-15);
     }
     
-    updateVoiceTranscriptUI();
+    // Debounce UI updates for better performance
+    if (updateTranscriptTimeout) {
+        clearTimeout(updateTranscriptTimeout);
+    }
+    updateTranscriptTimeout = setTimeout(updateVoiceTranscriptUI, 100);
 }
 
 function updateVoiceTranscriptUI() {
     const transcriptElement = document.getElementById('voice-transcript');
-    if (transcriptElement) {
-        transcriptElement.innerHTML = voiceTranscript.map(entry => {
-            const entryClass = entry.isInterim ? 'voice-transcript-interim' : 'voice-transcript-text';
-            return `<div class="voice-transcript-entry">
-                <span class="voice-transcript-timestamp">${entry.timestamp}</span>
-                <span class="${entryClass}">${entry.text}</span>
-            </div>`;
-        }).join('');
+    if (!transcriptElement) return;
+    
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    voiceTranscript.forEach(entry => {
+        const entryDiv = document.createElement('div');
+        entryDiv.className = 'voice-transcript-entry';
         
-        // Scroll to bottom
-        transcriptElement.scrollTop = transcriptElement.scrollHeight;
-    }
+        const timestampSpan = document.createElement('span');
+        timestampSpan.className = 'voice-transcript-timestamp';
+        timestampSpan.textContent = entry.timestamp;
+        
+        const textSpan = document.createElement('span');
+        textSpan.className = entry.isInterim ? 'voice-transcript-interim' : 'voice-transcript-text';
+        textSpan.textContent = entry.text;
+        
+        entryDiv.appendChild(timestampSpan);
+        entryDiv.appendChild(textSpan);
+        fragment.appendChild(entryDiv);
+    });
+    
+    // Clear and append in one operation
+    transcriptElement.innerHTML = '';
+    transcriptElement.appendChild(fragment);
+    
+    // Scroll to bottom
+    transcriptElement.scrollTop = transcriptElement.scrollHeight;
 }
 
 function clearVoiceTranscript() {
@@ -437,12 +458,14 @@ async function loadWhisperModel() {
                 if (result.isFinal) {
                     addDebugLog(`Final transcription result: "${result.text}"`, 'INFO');
                     addVoiceTranscript(result.text, false); // Add final transcript
-                    handleVoiceCommand(result);
                     currentInterimText = '';
                 } else {
-                    addDebugLog(`Interim transcription: "${result.text}"`, 'DEBUG');
-                    addVoiceTranscript(result.text, true); // Add interim transcript
-                    currentInterimText = result.text;
+                    // Only update interim if text has changed significantly
+                    if (currentInterimText !== result.text) {
+                        addDebugLog(`Interim transcription: "${result.text}"`, 'DEBUG');
+                        addVoiceTranscript(result.text, true); // Add interim transcript
+                        currentInterimText = result.text;
+                    }
                 }
                 updateUI();
             }
@@ -450,27 +473,57 @@ async function loadWhisperModel() {
 
         addDebugLog('Whisper Model Loaded and ready', 'INFO');
         updateUI();
+        
+        // Update microphone status after initialization
+        setTimeout(() => {
+            updateMicrophoneStatus();
+        }, 1000);
     } catch (error) {
         addDebugLog(`Failed to load Whisper module: ${error.message}`, 'ERROR');
         console.error('[ERROR] Failed to load Whisper module:', error);
     }
 }
 
-function startListening() {
+async function startListening() {
     if (!whisperModule) {
         addDebugLog('Whisper module not loaded - cannot start listening', 'ERROR');
         return;
     }
 
+    // Check microphone status first
+    try {
+        const micStatus = await whisperModule.checkMicrophoneStatus();
+        if (!micStatus.available) {
+            addDebugLog(`Microphone not available: ${micStatus.message}`, 'ERROR');
+            alert('Microphone not available. Please check your microphone permissions and try again.');
+            return;
+        }
+    } catch (error) {
+        addDebugLog(`Error checking microphone status: ${error.message}`, 'ERROR');
+    }
+
     addDebugLog('Starting voice recording...', 'DEBUG');
-    whisperModule.startRecording().then(() => {
+    try {
+        await whisperModule.startRecording();
         isListening = true;
         addDebugLog('Voice recording started successfully', 'INFO');
         updateUI();
-    }).catch(error => {
+        
+        // Start periodic check for voice recognition status
+        startRecognitionCheck();
+    } catch (error) {
         addDebugLog(`Failed to start recording: ${error.message}`, 'ERROR');
         console.error('[ERROR] Failed to start recording:', error);
-    });
+        
+        // Provide user-friendly error message
+        if (error.message.includes('permission')) {
+            alert('Microphone permission denied. Please allow microphone access and try again.');
+        } else if (error.message.includes('not supported')) {
+            alert('Speech recognition is not supported in this browser. Please use Chrome, Firefox, or Safari.');
+        } else {
+            alert('Failed to start voice recognition. Please check your microphone and try again.');
+        }
+    }
 }
 
 function stopListening() {
@@ -480,6 +533,10 @@ function stopListening() {
         isListening = false;
         currentInterimText = '';
         addDebugLog('Voice recording stopped', 'INFO');
+        
+        // Stop periodic check
+        stopRecognitionCheck();
+        
         updateUI();
     } else {
         addDebugLog('Cannot stop recording - not currently recording', 'WARN');
@@ -553,139 +610,18 @@ function showDynamicCommands() {
 }
 
 function handleVoiceCommand(result) {
-    const { text, action, param } = typeof result === 'string' ? { text: result, action: '', param: '' } : result;
-    addDebugLog(`Handling voice command: "${text}" (action: ${action})`, 'DEBUG');
+    // Simplified - just log the transcription
+    const { text, action } = typeof result === 'string' ? { text: result, action: '' } : result;
+    addDebugLog(`Voice transcription: "${text}"`, 'INFO');
     lastRecognizedCommand = text;
-    updateUI();
     
-    // Try dynamic command map first
-    for (const cmd of dynamicCommandMap) {
-        if (typeof cmd.pattern === 'string') {
-            if (text.toLowerCase() === cmd.pattern) {
-                addDebugLog(`Dynamic command matched: ${cmd.pattern}`, 'ACTION');
-                cmd.action();
-                lastUnrecognizedCommand = '';
-                return;
-            }
-        } else if (cmd.pattern instanceof RegExp) {
-            const match = text.toLowerCase().match(cmd.pattern);
-            if (match) {
-                addDebugLog(`Dynamic command matched: ${cmd.pattern}`, 'ACTION');
-                cmd.action(match[1]);
-                lastUnrecognizedCommand = '';
-                return;
-            }
-        }
+    // Just speak back what was heard for confirmation
+    if (isSpeechEnabled) {
+        speak(`I heard: "${text}"`);
     }
-    // Only respond if input is at least 2 words and not the same as last unrecognized
-    if (text.trim().split(/\s+/).length >= 2 && text !== lastUnrecognizedCommand) {
-        addDebugLog(`No section or command found for: "${text}"`, 'WARN');
-        lastUnrecognizedCommand = text;
-    }
-
-    switch (action) {
-        case 'navigate':
-            navigateToSection(param);
-            break;
-        case 'submit_form':
-        case 'submit_return':
-            submitReturnForm();
-            break;
-        case 'submit_replacement':
-            submitReplacementForm();
-            break;
-        case 'track_request':
-            trackRequest();
-            break;
-        case 'scroll_down':
-            addDebugLog('Executing: Scroll down action', 'ACTION');
-            window.scrollBy(0, window.innerHeight / 2);
-            speak('Scrolling down');
-            break;
-        case 'scroll_up':
-            addDebugLog('Executing: Scroll up action', 'ACTION');
-            window.scrollBy(0, -window.innerHeight / 2);
-            speak('Scrolling up');
-            break;
-        case 'click':
-            if (param) {
-                addDebugLog(`Executing: Click action for text "${param}"`, 'ACTION');
-                clickElementByText(param);
-            } else {
-                addDebugLog('Click command missing target text', 'WARN');
-                speak('Please specify what to click');
-            }
-            break;
-        case 'read_page': {
-            const text = document.body.innerText.slice(0, 300);
-            addDebugLog('Executing: Read page action', 'ACTION');
-            speak(text);
-            break;
-        }
-        case 'start_listening':
-            addDebugLog('Executing: Start listening from voice command', 'ACTION');
-            startListening();
-            break;
-        case 'stop_listening':
-            addDebugLog('Executing: Stop listening from voice command', 'ACTION');
-            stopListening();
-            break;
-        case 'call_support':
-            addDebugLog('Executing: Call support action', 'ACTION');
-            speak('Calling customer support at 1-800-SHOP-SMART');
-            setTimeout(() => alert('Connecting to customer support...'), 1000);
-            break;
-        case 'live_chat':
-            addDebugLog('Executing: Live chat action', 'ACTION');
-            speak('Opening live chat');
-            setTimeout(() => alert('Live chat window opening...'), 1000);
-            break;
-        case 'send_email':
-            addDebugLog('Executing: Send email action', 'ACTION');
-            speak('Opening email client');
-            window.open('mailto:support@shopsmart.com', '_blank');
-            break;
-        case 'help':
-            addDebugLog('Executing: Help action', 'ACTION');
-            speak('I can help you navigate the customer care website. Try saying "go to returns" or "submit form"');
-            break;
-        case 'fill_field':
-            if (param) {
-                fillFormField(param);
-            } else {
-                addDebugLog('Fill field command missing parameters', 'WARN');
-                speak('Please specify what field to fill');
-            }
-            break;
-        case 'unknown':
-            addDebugLog(`Command not recognized: "${text}"`, 'WARN');
-            speak(`Command not recognized: ${text}. Try saying "help me" for assistance.`);
-            break;
-        default: {
-            const lowerCommand = text.toLowerCase();
-            if (lowerCommand.includes('scroll down')) {
-                addDebugLog('Executing: Scroll down action (fallback)', 'ACTION');
-                window.scrollBy(0, window.innerHeight / 2);
-                speak('Scrolling down');
-            } else if (lowerCommand.includes('scroll up')) {
-                addDebugLog('Executing: Scroll up action (fallback)', 'ACTION');
-                window.scrollBy(0, -window.innerHeight / 2);
-                speak('Scrolling up');
-            } else if (lowerCommand.includes('click')) {
-                const targetText = text.replace('click', '').trim();
-                addDebugLog(`Executing: Click action for text "${targetText}" (fallback)`, 'ACTION');
-                clickElementByText(targetText);
-            } else if (lowerCommand.includes('read')) {
-                const pageText = document.body.innerText.slice(0, 300);
-                addDebugLog('Executing: Read page action (fallback)', 'ACTION');
-                speak(pageText);
-            } else {
-                addDebugLog(`Command not recognized: "${text}"`, 'WARN');
-                speak(`Command not recognized: ${text}. Try saying "help me" for assistance.`);
-            }
-            break;
-        }
-    }
+    
+    // Update UI
+    updateUI();
 }
 
 function navigateToSection(sectionName) {
@@ -827,15 +763,41 @@ function speak(text) {
     speechSynthesis.speak(utterance);
 }
 
+async function updateMicrophoneStatus() {
+    const micStatusElement = document.getElementById('mic-status');
+    if (!micStatusElement) return;
+    
+    try {
+        if (whisperModule) {
+            const status = await whisperModule.checkMicrophoneStatus();
+            if (status.available) {
+                micStatusElement.textContent = '✅ Available';
+                micStatusElement.style.color = 'green';
+            } else {
+                micStatusElement.textContent = '❌ Not Available';
+                micStatusElement.style.color = 'red';
+            }
+        } else {
+            micStatusElement.textContent = '⏳ Loading...';
+            micStatusElement.style.color = 'orange';
+        }
+    } catch (error) {
+        micStatusElement.textContent = '❌ Error';
+        micStatusElement.style.color = 'red';
+        addDebugLog(`Error updating microphone status: ${error.message}`, 'ERROR');
+    }
+}
+
 function updateUI() {
     const statusElement = document.getElementById('voice-status');
     const toggleButton = document.getElementById('voice-toggle-btn');
+    const forceRestartButton = document.getElementById('force-restart-btn');
     const lastCommandElement = document.getElementById('last-command');
     const liveSpeechElement = document.getElementById('live-speech');
     
     if (statusElement) {
         if (isListening) {
-            statusElement.textContent = 'Listening for "voice pilot"';
+            statusElement.textContent = 'Listening for speech';
         } else {
             statusElement.textContent = 'Idle';
         }
@@ -851,12 +813,57 @@ function updateUI() {
         }
     }
     
+    // Show/hide force restart and diagnose buttons
+    if (forceRestartButton) {
+        if (isListening) {
+            forceRestartButton.style.display = 'inline-block';
+        } else {
+            forceRestartButton.style.display = 'none';
+        }
+    }
+    
+    const diagnoseButton = document.getElementById('diagnose-btn');
+    if (diagnoseButton) {
+        // Always show diagnose button when module is loaded
+        diagnoseButton.style.display = whisperModule ? 'inline-block' : 'none';
+    }
+    
     if (lastCommandElement) {
         lastCommandElement.textContent = lastRecognizedCommand ? lastRecognizedCommand : '';
     }
     
     if (liveSpeechElement) {
         liveSpeechElement.textContent = currentInterimText ? currentInterimText : '';
+    }
+    
+    // Update microphone status
+    updateMicrophoneStatus();
+}
+
+// Add periodic check for voice recognition status
+let recognitionCheckInterval = null;
+
+function startRecognitionCheck() {
+    if (recognitionCheckInterval) {
+        clearInterval(recognitionCheckInterval);
+    }
+    
+    recognitionCheckInterval = setInterval(() => {
+        if (isListening && whisperModule) {
+            // Check if recognition is still active
+            const isActive = whisperModule.isLiveTranscribing;
+            if (!isActive) {
+                addDebugLog('Voice recognition appears to have stopped unexpectedly, restarting...', 'WARN');
+                whisperModule.forceRestart();
+            }
+        }
+    }, 10000); // Check every 10 seconds
+}
+
+function stopRecognitionCheck() {
+    if (recognitionCheckInterval) {
+        clearInterval(recognitionCheckInterval);
+        recognitionCheckInterval = null;
     }
 }
 
@@ -888,12 +895,15 @@ document.addEventListener('DOMContentLoaded', async () => {
         controls.innerHTML = `
             <div id="voice-control-panel" class="voice-panel">
                 <div class="voice-panel-header" id="voice-panel-header">
-                    <span>🎤 Voice Controls</span>
+                    <span>🎤 Voice Transcription</span>
                     <button id="voice-panel-minimize" class="voice-panel-minimize" title="Minimize">_</button>
                 </div>
                 <div class="voice-panel-body" id="voice-panel-body">
                     <div>Status: <span id="voice-status">Idle</span></div>
+                    <div>Microphone: <span id="mic-status">Checking...</span></div>
                     <button id="voice-toggle-btn">Start Listening</button>
+                    <button id="force-restart-btn" style="display: none;">🔄 Force Restart</button>
+                    <button id="diagnose-btn" style="display: none;">🔍 Diagnose</button>
                     <button id="speech-toggle-btn" class="speech-toggle-btn">🔊 Speech: ON</button>
                     <div>Last Command: <span id="last-command"></span></div>
                     <div>Live Speech: <span id="live-speech"></span></div>
@@ -978,6 +988,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         clearTranscriptBtn.addEventListener('click', clearVoiceTranscript);
     }
 
+    // Add click handler for the force restart button
+    const forceRestartBtn = document.getElementById('force-restart-btn');
+    if (forceRestartBtn) {
+        forceRestartBtn.addEventListener('click', forceRestartRecognition);
+    }
+
+    // Add click handler for the diagnose button
+    const diagnoseBtn = document.getElementById('diagnose-btn');
+    if (diagnoseBtn) {
+        diagnoseBtn.addEventListener('click', diagnoseRecognition);
+    }
+
     // Drag logic
     let isDragging = false, offsetX = 0, offsetY = 0;
     header.style.cursor = 'move';
@@ -1013,12 +1035,60 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 });
 
-function toggleListening() {
+async function toggleListening() {
     addDebugLog(`Toggle listening called - current state: ${isListening}`, 'DEBUG');
     if (isListening) {
         stopListening();
     } else {
-        startListening();
+        await startListening();
+    }
+}
+
+function forceRestartRecognition() {
+    if (whisperModule && isListening) {
+        addDebugLog('Force restarting voice recognition', 'INFO');
+        whisperModule.forceRestart();
+        updateUI();
+    } else {
+        addDebugLog('Cannot force restart - not currently listening', 'WARN');
+    }
+}
+
+async function diagnoseRecognition() {
+    if (whisperModule) {
+        addDebugLog('Diagnosing voice recognition issues...', 'INFO');
+        const diagnosis = await whisperModule.diagnoseRecognitionIssue();
+        addDebugLog(`Diagnosis result: ${diagnosis.issue} - ${diagnosis.message}`, 'INFO');
+        
+        // Show diagnosis in UI
+        const statusElement = document.getElementById('voice-status');
+        if (statusElement) {
+            statusElement.textContent = `Issue: ${diagnosis.issue}`;
+            statusElement.style.color = 'red';
+        }
+        
+        // Provide user-friendly message
+        let userMessage = '';
+        switch (diagnosis.issue) {
+            case 'microphone_not_available':
+                userMessage = 'No microphone found. Please check your microphone connection.';
+                break;
+            case 'microphone_not_working':
+                userMessage = 'Microphone not working. Please check microphone permissions and try again.';
+                break;
+            case 'speech_recognition_not_supported':
+                userMessage = 'Speech recognition not supported in this browser. Please use Chrome, Firefox, or Safari.';
+                break;
+            case 'no_audio_stream':
+                userMessage = 'No audio stream available. Please grant microphone permissions.';
+                break;
+            default:
+                userMessage = 'Unknown issue with voice recognition. Please try refreshing the page.';
+        }
+        
+        alert(userMessage);
+    } else {
+        addDebugLog('Cannot diagnose - whisper module not loaded', 'WARN');
     }
 }
 
