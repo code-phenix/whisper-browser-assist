@@ -164,8 +164,14 @@ class WhisperModule {
                 // Handle different error types
                 if (event.error === 'no-speech') {
                     this.addDebugLog('No speech detected - this is normal, continuing to listen', 'DEBUG');
-                    // For no-speech, don't restart immediately - let the continuous mode handle it
-                    // The continuous mode should keep listening without needing to restart
+                    // For no-speech, restart quickly to maintain continuous listening
+                    if (this.isRecording) {
+                        setTimeout(() => {
+                            if (this.isRecording && !this._isLiveTranscribing) {
+                                this.restartRecognition();
+                            }
+                        }, 1000);
+                    }
                 } else if (event.error === 'aborted') {
                     this.addDebugLog('Recognition aborted by user', 'DEBUG');
                     // Don't restart if aborted by user
@@ -206,13 +212,14 @@ class WhisperModule {
                 this._isLiveTranscribing = false;
                 this.addDebugLog('Voice recognition ended', 'INFO');
                 
-                // Only restart if we're still supposed to be recording
+                // Always restart if we're still supposed to be recording (continuous mode)
                 if (this.isRecording) {
+                    this.addDebugLog('Restarting for continuous listening...', 'DEBUG');
                     setTimeout(() => {
                         if (this.isRecording && !this._isLiveTranscribing) {
                             this.restartRecognition();
                         }
-                    }, 1500); // Slightly longer delay for normal end
+                    }, 500); // Faster restart for continuous mode
                 } else {
                     this.addDebugLog('Not restarting - recording was stopped by user', 'DEBUG');
                 }
@@ -238,7 +245,7 @@ class WhisperModule {
         
         try {
             this.speechRecognition.start();
-            this.addDebugLog('Restarting voice recognition', 'INFO');
+            this.addDebugLog('🔄 Restarting voice recognition for continuous mode', 'INFO');
         } catch (e) {
             this.addDebugLog('Failed to restart voice recognition: ' + e.message, 'ERROR');
             
@@ -250,30 +257,30 @@ class WhisperModule {
                 this.addDebugLog('Failed to stop recognition: ' + stopError.message, 'DEBUG');
             }
             
-            // Retry after a delay
+            // Retry after a shorter delay for continuous mode
             setTimeout(() => {
                 if (!this._isLiveTranscribing && this.isRecording) {
                     try {
                         this.speechRecognition.start();
-                        this.addDebugLog('Second attempt to restart voice recognition', 'INFO');
+                        this.addDebugLog('🔄 Second attempt to restart voice recognition', 'INFO');
                     } catch (e2) {
                         this.addDebugLog('Second attempt failed: ' + e2.message, 'ERROR');
                         
-                        // If second attempt fails, try one more time after a longer delay
+                        // If second attempt fails, try one more time after a shorter delay
                         setTimeout(() => {
                             if (!this._isLiveTranscribing && this.isRecording) {
                                 try {
                                     this.speechRecognition.start();
-                                    this.addDebugLog('Third attempt to restart voice recognition', 'INFO');
+                                    this.addDebugLog('🔄 Third attempt to restart voice recognition', 'INFO');
                                 } catch (e3) {
                                     this.addDebugLog('Third attempt failed: ' + e3.message, 'ERROR');
                                     this.addDebugLog('Giving up on restart attempts', 'ERROR');
                                 }
                             }
-                        }, 5000);
+                        }, 3000); // Shorter delay for continuous mode
                     }
                 }
-            }, 2000);
+            }, 1000); // Shorter delay for continuous mode
         }
     }
 
@@ -356,7 +363,7 @@ class WhisperModule {
             this.isRecording = false;
         }
         
-        console.log('🎤 Voice recognition started - speak to see transcription!');
+        console.log('🎤 Continuous voice recognition started - speak continuously!');
     }
 
     async stopRecording() {
