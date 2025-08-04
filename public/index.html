@@ -1,185 +1,163 @@
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Customer Care - Returns & Replacements</title>
     <link rel="stylesheet" href="../src/customer-care/style.css">
 </head>
+
 <body>
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-header">
+                <h2>🔄 Loading AI Models</h2>
+                <p>Please wait while we load the voice recognition and language models...</p>
+            </div>
+            
+            <div class="model-loading-section">
+                <div class="model-item">
+                    <div class="model-info">
+                        <span class="model-icon">🎤</span>
+                        <span class="model-name">Whisper Model</span>
+                        <span class="model-status" id="whisper-status">Initializing...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="whisper-progress"></div>
+                    </div>
+                </div>
+                
+                <div class="model-item">
+                    <div class="model-info">
+                        <span class="model-icon">🦙</span>
+                        <span class="model-name">TinyLlama Model</span>
+                        <span class="model-status" id="llama-status">Initializing...</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="llama-progress"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="loading-footer">
+                <div class="overall-progress">
+                    <span>Overall Progress: </span>
+                    <span id="overall-progress-text">0%</span>
+                </div>
+                <div class="loading-tips">
+                    <p>💡 Tip: This may take 10-30 seconds depending on your device</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
     <div class="container">
         <header class="header">
-            <div class="logo">
-                <h1>🛍️ ShopSmart</h1>
-                <p>Customer Care Center</p>
-            </div>
-            <nav class="nav">
-                <a href="#returns" class="nav-link active">Returns</a>
-                <a href="#replacements" class="nav-link">Replacements</a>
-                <a href="#tracking" class="nav-link">Track Status</a>
-                <a href="#contact" class="nav-link">Contact Us</a>
-            </nav>
+            <h1>Customer Care Portal</h1>
+            <p>Returns, Replacements & Support</p>
         </header>
+
+        <nav class="nav">
+            <a href="#returns" class="nav-link active">Returns</a>
+            <a href="#replacements" class="nav-link">Replacements</a>
+            <a href="#tracking" class="nav-link">Tracking</a>
+            <a href="#contact" class="nav-link">Contact</a>
+        </nav>
 
         <main class="main-content">
             <!-- Returns Section -->
             <section id="returns" class="section active">
-                <h2>📦 Return Your Order</h2>
-                <p class="section-description">Need to return an item? We make it easy with our simple return process.</p>
-                
-                <div class="form-container">
-                    <form class="return-form">
-                        <div class="form-group">
-                            <label for="orderNumber">Order Number *</label>
-                            <input type="text" id="orderNumber" name="orderNumber" placeholder="Enter your order number" required>
+                <h2>Return Request</h2>
+                <div class="customer-info">
+                    <h3>Customer Information</h3>
+                    <div class="customer-details">
+                        <div class="customer-detail">
+                            <label>Name:</label>
+                            <span id="customer-name">Loading...</span>
                         </div>
-                        
-                        <div class="form-group">
-                            <label for="email">Email Address *</label>
-                            <input type="email" id="email" name="email" placeholder="Enter your email" required>
+                        <div class="customer-detail">
+                            <label>Email:</label>
+                            <span id="customer-email">Loading...</span>
                         </div>
-                        
-                        <div class="form-group">
-                            <label for="returnReason">Reason for Return *</label>
-                            <select id="returnReason" name="returnReason" required>
-                                <option value="">Select a reason</option>
-                                <option value="wrong-size">Wrong Size</option>
-                                <option value="defective">Defective Item</option>
-                                <option value="not-as-described">Not as Described</option>
-                                <option value="changed-mind">Changed My Mind</option>
-                                <option value="duplicate-order">Duplicate Order</option>
-                                <option value="other">Other</option>
-                            </select>
+                        <div class="customer-detail">
+                            <label>Phone:</label>
+                            <span id="customer-phone">Loading...</span>
                         </div>
-                        
-                        <div class="form-group">
-                            <label for="returnDescription">Additional Details</label>
-                            <textarea id="returnDescription" name="returnDescription" rows="4" placeholder="Please provide more details about your return..."></textarea>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Items to Return</label>
-                            <div class="item-list">
-                                <div class="item-checkbox">
-                                    <input type="checkbox" id="item1" name="items[]" value="item1">
-                                    <label for="item1">Blue T-Shirt - Size M - $29.99</label>
-                                </div>
-                                <div class="item-checkbox">
-                                    <input type="checkbox" id="item2" name="items[]" value="item2">
-                                    <label for="item2">Wireless Headphones - $89.99</label>
-                                </div>
-                                <div class="item-checkbox">
-                                    <input type="checkbox" id="item3" name="items[]" value="item3">
-                                    <label for="item3">Smart Watch - $199.99</label>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <button type="submit" class="btn-primary">Submit Return Request</button>
-                    </form>
+                    </div>
                 </div>
+
+                <form class="return-form">
+                    <div class="form-group">
+                        <label for="order-number">Order Number:</label>
+                        <input type="text" id="order-number" name="orderNumber" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="return-reason">Reason for Return:</label>
+                        <select id="return-reason" name="returnReason" required>
+                            <option value="">Select a reason</option>
+                            <option value="defective">Defective Product</option>
+                            <option value="wrong-size">Wrong Size</option>
+                            <option value="not-as-described">Not as Described</option>
+                            <option value="changed-mind">Changed Mind</option>
+                            <option value="other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="return-description">Description:</label>
+                        <textarea id="return-description" name="description" rows="4" placeholder="Please describe the issue..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Submit Return Request</button>
+                    </div>
+                </form>
             </section>
 
             <!-- Replacements Section -->
             <section id="replacements" class="section">
-                <h2>🔄 Request Replacement</h2>
-                <p class="section-description">Got a defective item? We'll replace it with a new one at no extra cost.</p>
-                
-                <div class="form-container">
-                    <form class="replacement-form">
-                        <div class="form-group">
-                            <label for="repOrderNumber">Order Number *</label>
-                            <input type="text" id="repOrderNumber" name="repOrderNumber" placeholder="Enter your order number" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="repEmail">Email Address *</label>
-                            <input type="email" id="repEmail" name="repEmail" placeholder="Enter your email" required>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="defectType">Type of Defect *</label>
-                            <select id="defectType" name="defectType" required>
-                                <option value="">Select defect type</option>
-                                <option value="physical-damage">Physical Damage</option>
-                                <option value="not-working">Not Working</option>
-                                <option value="missing-parts">Missing Parts</option>
-                                <option value="wrong-item">Wrong Item Received</option>
-                                <option value="quality-issue">Quality Issue</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="defectDescription">Describe the Issue *</label>
-                            <textarea id="defectDescription" name="defectDescription" rows="4" placeholder="Please describe the defect in detail..." required></textarea>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Upload Photos (Optional)</label>
-                            <input type="file" id="defectPhotos" name="defectPhotos" multiple accept="image/*">
-                            <small>Upload photos of the defect to help us process your request faster</small>
-                        </div>
-                        
-                        <button type="submit" class="btn-primary">Request Replacement</button>
-                    </form>
-                </div>
+                <h2>Replacement Request</h2>
+                <form class="replacement-form">
+                    <div class="form-group">
+                        <label for="replacement-order">Original Order Number:</label>
+                        <input type="text" id="replacement-order" name="originalOrder" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="replacement-reason">Reason for Replacement:</label>
+                        <select id="replacement-reason" name="replacementReason" required>
+                            <option value="">Select a reason</option>
+                            <option value="defective">Defective Product</option>
+                            <option value="damaged">Damaged in Transit</option>
+                            <option value="wrong-item">Wrong Item Received</option>
+                            <option value="quality-issue">Quality Issue</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="replacement-description">Issue Description:</label>
+                        <textarea id="replacement-description" name="description" rows="4" placeholder="Please describe the issue..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Submit Replacement Request</button>
+                    </div>
+                </form>
             </section>
 
             <!-- Tracking Section -->
             <section id="tracking" class="section">
-                <h2>📊 Track Your Request</h2>
-                <p class="section-description">Check the status of your return or replacement request.</p>
-                
-                <div class="tracking-container">
-                    <div class="tracking-form">
-                        <div class="form-group">
-                            <label for="trackingNumber">Request Number</label>
-                            <input type="text" id="trackingNumber" name="trackingNumber" placeholder="Enter your request number">
-                        </div>
-                        <button type="button" class="btn-secondary" onclick="trackRequest()">Track Request</button>
+                <h2>Track Your Request</h2>
+                <div class="tracking-form">
+                    <div class="form-group">
+                        <label for="trackingNumber">Tracking Number:</label>
+                        <input type="text" id="trackingNumber" placeholder="Enter your tracking number">
+                        <button onclick="trackRequest()" class="btn btn-secondary">Track</button>
                     </div>
-                    
-                    <div class="tracking-results" id="trackingResults">
-                        <div class="status-card">
-                            <h3>Request #RET-2024-001</h3>
-                            <div class="status-timeline">
-                                <div class="status-step completed">
-                                    <div class="step-icon">✓</div>
-                                    <div class="step-content">
-                                        <h4>Request Submitted</h4>
-                                        <p>Dec 26, 2024 - 10:30 AM</p>
-                                    </div>
-                                </div>
-                                <div class="status-step completed">
-                                    <div class="step-icon">✓</div>
-                                    <div class="step-content">
-                                        <h4>Request Approved</h4>
-                                        <p>Dec 26, 2024 - 2:15 PM</p>
-                                    </div>
-                                </div>
-                                <div class="status-step active">
-                                    <div class="step-icon">📦</div>
-                                    <div class="step-content">
-                                        <h4>Return Label Sent</h4>
-                                        <p>Dec 26, 2024 - 3:45 PM</p>
-                                    </div>
-                                </div>
-                                <div class="status-step">
-                                    <div class="step-icon">⏳</div>
-                                    <div class="step-content">
-                                        <h4>Item Received</h4>
-                                        <p>Pending</p>
-                                    </div>
-                                </div>
-                                <div class="status-step">
-                                    <div class="step-icon">💰</div>
-                                    <div class="step-content">
-                                        <h4>Refund Processed</h4>
-                                        <p>Pending</p>
-                                    </div>
-                                </div>
-                            </div>
+                    <div id="trackingResults" style="display: none;">
+                        <h3>Tracking Results</h3>
+                        <div class="tracking-info">
+                            <p><strong>Status:</strong> <span id="tracking-status">Processing</span></p>
+                            <p><strong>Last Update:</strong> <span id="tracking-date">2024-01-15</span></p>
+                            <p><strong>Estimated Delivery:</strong> <span id="tracking-delivery">2024-01-20</span></p>
                         </div>
                     </div>
                 </div>
@@ -187,57 +165,87 @@
 
             <!-- Contact Section -->
             <section id="contact" class="section">
-                <h2>📞 Contact Customer Care</h2>
-                <p class="section-description">Need immediate assistance? Reach out to our customer care team.</p>
-                
-                <div class="contact-container">
-                    <div class="contact-methods">
-                        <div class="contact-card">
-                            <div class="contact-icon">📞</div>
-                            <h3>Phone Support</h3>
-                            <p>1-800-SHOP-SMART</p>
-                            <p class="contact-hours">24/7 Available</p>
-                            <button class="btn-secondary">Call Now</button>
-                        </div>
-                        
-                        <div class="contact-card">
-                            <div class="contact-icon">💬</div>
-                            <h3>Live Chat</h3>
-                            <p>Chat with our agents</p>
-                            <p class="contact-hours">Mon-Fri: 8AM-8PM EST</p>
-                            <button class="btn-secondary">Start Chat</button>
-                        </div>
-                        
-                        <div class="contact-card">
-                            <div class="contact-icon">📧</div>
-                            <h3>Email Support</h3>
-                            <p>support@shopsmart.com</p>
-                            <p class="contact-hours">Response within 24h</p>
-                            <button class="btn-secondary">Send Email</button>
-                        </div>
+                <h2>Contact Support</h2>
+                <div class="contact-info">
+                    <div class="contact-card">
+                        <h3>📞 Phone Support</h3>
+                        <p><strong>Hours:</strong> 24/7</p>
+                        <p><strong>Number:</strong> 1-800-WALMART</p>
                     </div>
-                    
-                    <div class="faq-section">
-                        <h3>Frequently Asked Questions</h3>
-                        <div class="faq-item">
-                            <h4>How long does it take to process a return?</h4>
-                            <p>Returns are typically processed within 3-5 business days after we receive your item.</p>
-                        </div>
-                        <div class="faq-item">
-                            <h4>Do I need to pay for return shipping?</h4>
-                            <p>No, we provide free return shipping labels for all returns within 30 days of purchase.</p>
-                        </div>
-                        <div class="faq-item">
-                            <h4>When will I receive my refund?</h4>
-                            <p>Refunds are processed within 5-7 business days after we receive and inspect your return.</p>
-                        </div>
+                    <div class="contact-card">
+                        <h3>💬 Live Chat</h3>
+                        <p><strong>Hours:</strong> 6 AM - 10 PM EST</p>
+                        <p><strong>Status:</strong> Available</p>
+                    </div>
+                    <div class="contact-card">
+                        <h3>📧 Email Support</h3>
+                        <p><strong>Response Time:</strong> 24 hours</p>
+                        <p><strong>Email:</strong> support@walmart.com</p>
+                    </div>
+                </div>
+                
+                <div class="faq-section">
+                    <h3>Frequently Asked Questions</h3>
+                    <div class="faq-item">
+                        <h4>How long does a return take to process?</h4>
+                        <p>Returns are typically processed within 3-5 business days after we receive your item.</p>
+                    </div>
+                    <div class="faq-item">
+                        <h4>When will I receive my refund?</h4>
+                        <p>Refunds are processed within 5-7 business days after we receive and inspect your return.
+                        </p>
                     </div>
                 </div>
             </section>
         </main>
     </div>
 
+    <!-- Voice Control Panel -->
+    <div id="voice-control-panel" class="voice-panel">
+        <div class="voice-panel-header" id="voice-panel-header">
+            <span>🎤 Voice Transcription</span>
+            <button id="voice-panel-minimize" class="voice-panel-minimize" title="Minimize">_</button>
+        </div>
+        <div class="voice-panel-body" id="voice-panel-body">
+            <div>Status: <span id="voice-status">Idle</span></div>
+            <div>Microphone: <span id="mic-status">Checking...</span></div>
+            <button id="voice-toggle-btn">Start Listening</button>
+            <button id="force-restart-btn" style="display: none;">🔄 Force Restart</button>
+            <button id="diagnose-btn" style="display: none;">🔍 Diagnose</button>
+            <button id="speech-toggle-btn" class="speech-toggle-btn">🔊 Speech: ON</button>
+            <div>Last Command: <span id="last-command"></span></div>
+            <div>Live Speech: <span id="live-speech"></span></div>
+            <div id="voice-commands-section" class="voice-commands-section">
+                <div class="voice-commands-title">Available Voice Commands</div>
+                <div id="debug-panel" class="voice-commands-list"></div>
+            </div>
+            <div id="voice-transcript-section" class="voice-transcript-section">
+                <div class="voice-transcript-header">
+                    <div class="voice-transcript-title">📝 Continuous Voice Transcript</div>
+                    <button id="clear-transcript-btn" class="clear-transcript-btn" title="Clear transcript">🗑️</button>
+                </div>
+                <div id="voice-transcript" class="voice-transcript-content"></div>
+            </div>
+            <div id="dsl-debug-section" class="dsl-debug-section">
+                <div class="dsl-debug-header">
+                    <div class="dsl-debug-title">🔍 DSL Debug</div>
+                </div>
+                <div id="dsl-debug" class="dsl-debug-content"></div>
+            </div>
+            <div id="dsl-commands-section" class="dsl-commands-section">
+                <div class="dsl-commands-header">
+                    <div class="dsl-commands-title">🔄 DSL Commands</div>
+                    <button id="clear-dsl-btn" class="clear-dsl-btn" title="Clear DSL commands">🗑️</button>
+                </div>
+                <div id="dsl-commands" class="dsl-commands-content"></div>
+            </div>
+
+        </div>
+    </div>
+
     <script src="../src/voice-translation/whisper.cpp.js"></script>
+    <script src="../src/customer-care/llama-integration.js"></script>
+    <script src="../src/customer-care/dsl-executor.js"></script>
     <script src="../src/customer-care/main.js"></script>
     <script>
         // Navigation functionality
@@ -245,11 +253,11 @@
             link.addEventListener('click', (e) => {
                 e.preventDefault();
                 const targetId = link.getAttribute('href').substring(1);
-                
+
                 // Update active nav link
                 document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
                 link.classList.add('active');
-                
+
                 // Show target section
                 document.querySelectorAll('.section').forEach(section => {
                     section.classList.remove('active');
@@ -279,4 +287,5 @@
         }
     </script>
 </body>
+
 </html>

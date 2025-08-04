@@ -139,3 +139,9 @@ If you encounter any issues or have questions:
 ---
 
 **Happy Voice Controlling! 🎤✨** 
+
+
+https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/tree/main
+
+tinyllama-1.1b-chat-v1.0.Q2_K.gguf
+

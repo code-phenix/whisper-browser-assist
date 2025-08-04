@@ -1,5 +1,4 @@
-
-// Customer Care Application with JSON Data Loading
+// Customer Care Application with Voice Transcription and Llama DSL
 let whisperModule = null;
 let isListening = false;
 let lastRecognizedCommand = '';
@@ -9,7 +8,21 @@ let customerData = null;
 let ordersData = null;
 let returnsData = null;
 let lastUnrecognizedCommand = '';
-let isSpeechEnabled = true; // New variable to control speech output
+let isSpeechEnabled = true;
+// Make speech setting globally accessible
+window.isSpeechEnabled = isSpeechEnabled;
+
+// Llama and DSL components
+let llamaIntegration = null;
+let dslExecutor = null;
+
+// Voice transcript functionality
+let voiceTranscript = [];
+let updateTranscriptTimeout = null;
+
+// DSL tracking
+let dslCommands = [];
+let dslCommandsTimeout = null;
 
 function addDebugLog(message, type = 'INFO') {
     const timestamp = new Date().toLocaleTimeString();
@@ -25,70 +38,63 @@ function addDebugLog(message, type = 'INFO') {
     updateDebugUI();
 }
 
-// Voice transcript functionality
-let voiceTranscript = [];
-let updateTranscriptTimeout = null;
+// Make debug function globally accessible
+window.addDebugLog = addDebugLog;
 
+// Make progress functions globally accessible
+window.updateWhisperProgress = updateWhisperProgress;
+window.updateLlamaProgress = updateLlamaProgress;
+
+// Voice transcript functionality
 function addVoiceTranscript(text, isInterim = false) {
     const timestamp = new Date().toLocaleTimeString();
-    const entry = {
-        text: text,
-        timestamp: timestamp,
-        isInterim: isInterim
-    };
     
     if (isInterim) {
-        // Update the last entry if it's interim, otherwise add new
-        if (voiceTranscript.length > 0 && voiceTranscript[voiceTranscript.length - 1].isInterim) {
-            voiceTranscript[voiceTranscript.length - 1] = entry;
+        // Update existing interim entry or create new one
+        const existingInterim = voiceTranscript.find(entry => entry.isInterim);
+        if (existingInterim) {
+            existingInterim.text = text;
+            existingInterim.timestamp = timestamp;
         } else {
-            voiceTranscript.push(entry);
+            voiceTranscript.push({
+                text: text,
+                timestamp: timestamp,
+                isInterim: true
+            });
         }
     } else {
-        // Remove any interim entries and add final
+        // Remove any interim entries and add final entry
         voiceTranscript = voiceTranscript.filter(entry => !entry.isInterim);
-        voiceTranscript.push(entry);
+        voiceTranscript.push({
+            text: text,
+            timestamp: timestamp,
+            isInterim: false
+        });
     }
     
-    // Keep only last 15 transcript entries for better performance
-    if (voiceTranscript.length > 15) {
-        voiceTranscript = voiceTranscript.slice(-15);
+    // Keep only last 20 entries
+    if (voiceTranscript.length > 20) {
+        voiceTranscript = voiceTranscript.slice(-20);
     }
     
-    // Debounce UI updates for better performance
-    if (updateTranscriptTimeout) {
-        clearTimeout(updateTranscriptTimeout);
-    }
-    updateTranscriptTimeout = setTimeout(updateVoiceTranscriptUI, 100);
+        updateVoiceTranscriptUI();
 }
 
 function updateVoiceTranscriptUI() {
     const transcriptElement = document.getElementById('voice-transcript');
     if (!transcriptElement) return;
     
-    // Use DocumentFragment for better performance
-    const fragment = document.createDocumentFragment();
+    transcriptElement.innerHTML = '';
     
     voiceTranscript.forEach(entry => {
         const entryDiv = document.createElement('div');
-        entryDiv.className = 'voice-transcript-entry';
-        
-        const timestampSpan = document.createElement('span');
-        timestampSpan.className = 'voice-transcript-timestamp';
-        timestampSpan.textContent = entry.timestamp;
-        
-        const textSpan = document.createElement('span');
-        textSpan.className = entry.isInterim ? 'voice-transcript-interim' : 'voice-transcript-text';
-        textSpan.textContent = entry.text;
-        
-        entryDiv.appendChild(timestampSpan);
-        entryDiv.appendChild(textSpan);
-        fragment.appendChild(entryDiv);
+        entryDiv.className = `transcript-entry ${entry.isInterim ? 'interim' : 'final'}`;
+        entryDiv.innerHTML = `
+            <span class="transcript-time">${entry.timestamp}</span>
+            <span class="transcript-text">${entry.text}</span>
+        `;
+        transcriptElement.appendChild(entryDiv);
     });
-    
-    // Clear and append in one operation
-    transcriptElement.innerHTML = '';
-    transcriptElement.appendChild(fragment);
     
     // Scroll to bottom
     transcriptElement.scrollTop = transcriptElement.scrollHeight;
@@ -97,1038 +103,716 @@ function updateVoiceTranscriptUI() {
 function clearVoiceTranscript() {
     voiceTranscript = [];
     updateVoiceTranscriptUI();
-    addDebugLog('Voice transcript cleared', 'INFO');
 }
 
 function updateDebugUI() {
-    const debugElement = document.getElementById('debugLog');
-    if (debugElement) {
-        debugElement.innerHTML = debugLog.slice(-10).map(log => 
-            `<div style="font-size: 11px; margin: 2px 0; font-family: monospace;">${log}</div>`
-        ).join('');
-    }
+    const debugPanel = document.getElementById('debug-panel');
+    if (!debugPanel) return;
+    
+    debugPanel.innerHTML = '';
+    
+    // Show last 10 debug entries
+    const recentLogs = debugLog.slice(-10);
+    recentLogs.forEach(log => {
+        const logDiv = document.createElement('div');
+        logDiv.className = 'debug-entry';
+        logDiv.textContent = log;
+        debugPanel.appendChild(logDiv);
+    });
 }
 
-// Data Loading Functions
+// Data loading functions
 async function loadCustomerData() {
     try {
-        addDebugLog('Loading customer data...', 'DEBUG');
         const response = await fetch('../src/customer-care/data/orders.json');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        customerData = data.customer;
-        ordersData = data.orders;
-        addDebugLog('Customer data loaded successfully', 'INFO');
-        return data;
+        customerData = await response.json();
+        addDebugLog('✅ Customer data loaded successfully', 'INFO');
     } catch (error) {
-        addDebugLog(`Failed to load customer data: ${error.message}`, 'ERROR');
-        console.error('Error loading customer data:', error);
-        return null;
+        addDebugLog(`❌ Failed to load customer data: ${error.message}`, 'ERROR');
     }
 }
 
 async function loadReturnsData() {
     try {
-        addDebugLog('Loading returns data...', 'DEBUG');
         const response = await fetch('../src/customer-care/data/returns.json');
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        returnsData = data;
-        addDebugLog('Returns data loaded successfully', 'INFO');
-        return data;
+        returnsData = await response.json();
+        addDebugLog('✅ Returns data loaded successfully', 'INFO');
     } catch (error) {
-        addDebugLog(`Failed to load returns data: ${error.message}`, 'ERROR');
-        console.error('Error loading returns data:', error);
-        return null;
+        addDebugLog(`❌ Failed to load returns data: ${error.message}`, 'ERROR');
     }
 }
 
-// UI Rendering Functions
-function renderCustomerInfo() {
-    if (!customerData) return;
-    
-    const customerInfoHtml = `
-        <div class="customer-info">
-            <h3>👤 Customer Information</h3>
-            <div class="customer-details">
-                <div class="customer-detail">
-                    <label>Name</label>
-                    <span>${customerData.name}</span>
-                </div>
-                <div class="customer-detail">
-                    <label>Email</label>
-                    <span>${customerData.email}</span>
-                </div>
-                <div class="customer-detail">
-                    <label>Phone</label>
-                    <span>${customerData.phone}</span>
-                </div>
-                <div class="customer-detail">
-                    <label>Customer ID</label>
-                    <span>${customerData.id}</span>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Insert customer info at the top of each section
-    document.querySelectorAll('.section').forEach(section => {
-        if (!section.querySelector('.customer-info')) {
-            section.insertAdjacentHTML('afterbegin', customerInfoHtml);
-        }
-    });
-}
-
-function renderOrderHistory() {
-    if (!ordersData) return;
-    
-    const orderHistoryHtml = `
-        <div class="order-history">
-            <h3>📦 Order History</h3>
-            ${ordersData.map(order => `
-                <div class="order-card">
-                    <div class="order-header">
-                        <div>
-                            <div class="order-id">${order.orderId}</div>
-                            <div class="order-date">${new Date(order.orderDate).toLocaleDateString()}</div>
-                        </div>
-                        <div class="order-status ${order.status}">${order.status}</div>
-                    </div>
-                    <div class="order-items">
-                        ${order.items.map(item => `
-                            <div class="order-item">
-                                <img src="${item.image}" alt="${item.name}" onerror="this.src='../src/customer-care/placeholder.png'">
-                                <div class="order-item-details">
-                                    <div class="order-item-name">${item.name}</div>
-                                    <div class="order-item-meta">
-                                        ${item.brand ? `Brand: ${item.brand}` : ''}
-                                        ${item.size ? `Size: ${item.size}` : ''}
-                                        ${item.color ? `Color: ${item.color}` : ''}
-                                        Qty: ${item.quantity}
-                                    </div>
-                                </div>
-                                <div class="order-item-price">$${item.price.toFixed(2)}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <div class="order-footer">
-                        <div class="order-total">Total: $${order.totalAmount.toFixed(2)}</div>
-                        <div class="order-actions">
-                            <button class="btn btn-secondary" onclick="selectOrderForReturn('${order.orderId}')">Return Items</button>
-                            <button class="btn btn-secondary" onclick="viewOrderDetails('${order.orderId}')">View Details</button>
-                        </div>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-    
-    // Add order history to returns section
-    const returnsSection = document.getElementById('returns');
-    if (returnsSection && !returnsSection.querySelector('.order-history')) {
-        const formContainer = returnsSection.querySelector('.form-container');
-        formContainer.insertAdjacentHTML('beforebegin', orderHistoryHtml);
-    }
-}
-
-function renderReturnsHistory() {
-    if (!returnsData) return;
-    
-    const returnsHistoryHtml = `
-        <div class="returns-history">
-            <h3>🔄 Returns & Replacements History</h3>
-            ${returnsData.returns.map(returnItem => `
-                <div class="order-card">
-                    <div class="order-header">
-                        <div>
-                            <div class="order-id">${returnItem.returnId}</div>
-                            <div class="order-date">${new Date(returnItem.requestDate).toLocaleDateString()}</div>
-                        </div>
-                        <div class="order-status ${returnItem.status}">${returnItem.status}</div>
-                    </div>
-                    <div class="order-items">
-                        ${returnItem.items.map(item => `
-                            <div class="order-item">
-                                <div class="order-item-details">
-                                    <div class="order-item-name">${item.name}</div>
-                                    <div class="order-item-meta">
-                                        ${item.size ? `Size: ${item.size}` : ''}
-                                        ${item.color ? `Color: ${item.color}` : ''}
-                                        Qty: ${item.quantity}
-                                    </div>
-                                </div>
-                                <div class="order-item-price">$${item.price.toFixed(2)}</div>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <div class="order-footer">
-                        <div class="order-total">
-                            ${returnItem.type === 'return' ? `Refund: $${returnItem.refundAmount.toFixed(2)}` : 'Replacement Requested'}
-                        </div>
-                        <div class="order-actions">
-                            <button class="btn btn-secondary" onclick="trackReturn('${returnItem.returnId}')">Track Status</button>
-                        </div>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    `;
-    
-    // Add returns history to tracking section
-    const trackingSection = document.getElementById('tracking');
-    if (trackingSection && !trackingSection.querySelector('.returns-history')) {
-        const trackingContainer = trackingSection.querySelector('.tracking-container');
-        trackingContainer.insertAdjacentHTML('beforeend', returnsHistoryHtml);
-    }
-}
-
-function populateReturnForm() {
-    if (!ordersData) return;
-    
-    const itemList = document.querySelector('.item-list');
-    if (itemList) {
-        // Get the most recent delivered order
-        const recentOrder = ordersData.find(order => order.status === 'delivered');
-        if (recentOrder) {
-            itemList.innerHTML = recentOrder.items.map(item => `
-                <div class="item-checkbox">
-                    <input type="checkbox" id="${item.itemId}" name="items[]" value="${item.itemId}">
-                    <label for="${item.itemId}">
-                        <div class="item-details">
-                            <div class="item-name">${item.name}</div>
-                            <div class="item-meta">
-                                ${item.brand ? `Brand: ${item.brand}` : ''}
-                                ${item.size ? `Size: ${item.size}` : ''}
-                                ${item.color ? `Color: ${item.color}` : ''}
-                            </div>
-                        </div>
-                        <div class="item-price">$${item.price.toFixed(2)}</div>
-                    </label>
-                </div>
-            `).join('');
-        }
-    }
-}
-
-function populateReturnReasons() {
-    if (!returnsData) return;
-    
-    const returnReasonSelect = document.getElementById('returnReason');
-    if (returnReasonSelect) {
-        returnReasonSelect.innerHTML = '<option value="">Select a reason</option>' +
-            returnsData.returnReasons.map(reason => 
-                `<option value="${reason.id}">${reason.name}</option>`
-            ).join('');
-    }
-    
-    const defectTypeSelect = document.getElementById('defectType');
-    if (defectTypeSelect) {
-        defectTypeSelect.innerHTML = '<option value="">Select defect type</option>' +
-            returnsData.defectTypes.map(defect => 
-                `<option value="${defect.id}">${defect.name}</option>`
-            ).join('');
-    }
-}
-
-// Event Handlers
-function selectOrderForReturn(orderId) {
-    addDebugLog(`Selecting order ${orderId} for return`, 'ACTION');
-    const order = ordersData.find(o => o.orderId === orderId);
-    if (order) {
-        // Navigate to returns section
-        document.querySelector('a[href="#returns"]').click();
-        
-        // Pre-fill order number
-        const orderNumberInput = document.getElementById('orderNumber');
-        if (orderNumberInput) {
-            orderNumberInput.value = orderId;
-        }
-        
-        // Update item list for this order
-        const itemList = document.querySelector('.item-list');
-        if (itemList) {
-            itemList.innerHTML = order.items.map(item => `
-                <div class="item-checkbox">
-                    <input type="checkbox" id="${item.itemId}" name="items[]" value="${item.itemId}">
-                    <label for="${item.itemId}">
-                        <div class="item-details">
-                            <div class="item-name">${item.name}</div>
-                            <div class="item-meta">
-                                ${item.brand ? `Brand: ${item.brand}` : ''}
-                                ${item.size ? `Size: ${item.size}` : ''}
-                                ${item.color ? `Color: ${item.color}` : ''}
-                            </div>
-                        </div>
-                        <div class="item-price">$${item.price.toFixed(2)}</div>
-                    </label>
-                </div>
-            `).join('');
-        }
-        
-        speak(`Selected order ${orderId} for return. You can now choose which items to return.`);
-    }
-}
-
-function trackReturn(returnId) {
-    addDebugLog(`Tracking return ${returnId}`, 'ACTION');
-    const returnItem = returnsData.returns.find(r => r.returnId === returnId);
-    if (returnItem) {
-        // Navigate to tracking section
-        document.querySelector('a[href="#tracking"]').click();
-        
-        // Pre-fill tracking number
-        const trackingInput = document.getElementById('trackingNumber');
-        if (trackingInput) {
-            trackingInput.value = returnId;
-        }
-        
-        // Show tracking results
-        showTrackingResults(returnItem);
-        
-        speak(`Showing tracking information for return ${returnId}`);
-    }
-}
-
-function showTrackingResults(returnItem) {
-    const trackingResults = document.getElementById('trackingResults');
-    if (trackingResults) {
-        trackingResults.style.display = 'block';
-        trackingResults.innerHTML = `
-            <div class="status-card">
-                <h3>${returnItem.returnId}</h3>
-                <div class="status-timeline">
-                    ${returnItem.timeline.map((step, index) => `
-                        <div class="status-step ${index < returnItem.timeline.length - 1 ? 'completed' : 'active'}">
-                            <div class="step-icon">${index < returnItem.timeline.length - 1 ? '✓' : '📦'}</div>
-                            <div class="step-content">
-                                <h4>${step.description}</h4>
-                                <p>${new Date(step.date).toLocaleString()}</p>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-            </div>
-        `;
-    }
-}
-
-function viewOrderDetails(orderId) {
-    addDebugLog(`Viewing order details for ${orderId}`, 'ACTION');
-    const order = ordersData.find(o => o.orderId === orderId);
-    if (order) {
-        const detailsHtml = `
-            <div class="order-details-modal">
-                <h3>Order Details - ${orderId}</h3>
-                <p><strong>Order Date:</strong> ${new Date(order.orderDate).toLocaleString()}</p>
-                <p><strong>Status:</strong> ${order.status}</p>
-                <p><strong>Total Amount:</strong> $${order.totalAmount.toFixed(2)}</p>
-                <p><strong>Shipping Method:</strong> ${order.shipping.method}</p>
-                <p><strong>Tracking Number:</strong> ${order.shipping.trackingNumber}</p>
-                <p><strong>Payment Method:</strong> ${order.payment.method}</p>
-            </div>
-        `;
-        
-        // Show in a simple alert for now (could be enhanced with a modal)
-        alert(`Order ${orderId}\nStatus: ${order.status}\nTotal: $${order.totalAmount.toFixed(2)}\nTracking: ${order.shipping.trackingNumber}`);
-    }
-}
-
-// Voice Control Functions
-async function loadWhisperModel() {
-    addDebugLog('Starting to load Whisper WASM module...', 'DEBUG');
+// Whisper model loading with progress
+async function loadWhisperModelWithProgress() {
     try {
-        whisperModule = await createWhisperModule({
-            locateFile: (path) => {
-                if (path.includes('models/')) {
-                    return path.replace('models/', '../src/models/');
-                }
-                return path;
-            }
-        });
-        addDebugLog('Whisper WASM module loaded successfully', 'INFO');
+        addDebugLog('🔄 Loading Whisper model...', 'INFO');
+        updateWhisperProgress(20, 'Checking browser support...');
         
-        document.addEventListener('whisperResult', (event) => {
-            const result = event.detail;
-            addDebugLog(`Transcription event received: ${JSON.stringify(result)}`, 'DEBUG');
-            if (result && result.text) {
-                if (result.isFinal) {
-                    addDebugLog(`Final transcription result: "${result.text}"`, 'INFO');
-                    addVoiceTranscript(result.text, false); // Add final transcript
-                    currentInterimText = '';
-                    
-                    // For continuous mode, also update the live speech display
-                    const liveSpeechElement = document.getElementById('live-speech');
-                    if (liveSpeechElement) {
-                        liveSpeechElement.textContent = result.text;
-                        liveSpeechElement.style.color = 'green'; // Final result in green
-                    }
+        // Debug: Check what's available globally
+        addDebugLog(`🔍 Global objects check:`, 'DEBUG');
+        addDebugLog(`- window.createWhisperModule: ${typeof window.createWhisperModule}`, 'DEBUG');
+        addDebugLog(`- window.WhisperModule: ${typeof window.WhisperModule}`, 'DEBUG');
+        addDebugLog(`- window.SpeechRecognition: ${typeof window.SpeechRecognition}`, 'DEBUG');
+        addDebugLog(`- window.webkitSpeechRecognition: ${typeof window.webkitSpeechRecognition}`, 'DEBUG');
+        
+        updateWhisperProgress(40, 'Initializing Whisper module...');
+        
+        // Check if createWhisperModule is available globally
+        if (typeof window.createWhisperModule === 'function') {
+            addDebugLog('✅ createWhisperModule function found', 'INFO');
+            updateWhisperProgress(60, 'Creating Whisper module...');
+            
+            whisperModule = await window.createWhisperModule();
+            
+            updateWhisperProgress(80, 'Testing microphone...');
+            
+            // Test microphone functionality
+            if (whisperModule && typeof whisperModule.checkMicrophoneStatus === 'function') {
+                const micStatus = await whisperModule.checkMicrophoneStatus();
+                if (micStatus.available) {
+                    updateWhisperProgress(90, 'Microphone test passed...');
                 } else {
-                    // Only update interim if text has changed significantly
-                    if (currentInterimText !== result.text) {
-                        addDebugLog(`Interim transcription: "${result.text}"`, 'DEBUG');
-                        addVoiceTranscript(result.text, true); // Add interim transcript
-                        currentInterimText = result.text;
-                        
-                        // Update live speech display for interim results
-                        const liveSpeechElement = document.getElementById('live-speech');
-                        if (liveSpeechElement) {
-                            liveSpeechElement.textContent = result.text;
-                            liveSpeechElement.style.color = 'blue'; // Interim result in blue
-                        }
-                    }
+                    updateWhisperProgress(90, 'Microphone not available...');
                 }
-                updateUI();
             }
-        });
-
-        addDebugLog('Whisper Model Loaded and ready', 'INFO');
-        updateUI();
-        
-        // Update microphone status after initialization
-        setTimeout(() => {
-            updateMicrophoneStatus();
-        }, 1000);
+            
+            addDebugLog('✅ Whisper model loaded successfully', 'INFO');
+            return true;
+        } else {
+            addDebugLog('❌ createWhisperModule function not available', 'ERROR');
+            addDebugLog('🔍 Available global functions:', 'DEBUG');
+            Object.keys(window).forEach(key => {
+                if (typeof window[key] === 'function' && key.toLowerCase().includes('whisper')) {
+                    addDebugLog(`- ${key}: ${typeof window[key]}`, 'DEBUG');
+                }
+            });
+            return false;
+        }
     } catch (error) {
-        addDebugLog(`Failed to load Whisper module: ${error.message}`, 'ERROR');
-        console.error('[ERROR] Failed to load Whisper module:', error);
+        addDebugLog(`❌ Error loading Whisper model: ${error.message}`, 'ERROR');
+        addDebugLog(`❌ Error stack: ${error.stack}`, 'ERROR');
+        return false;
     }
 }
 
+// Original function for backward compatibility
+async function loadWhisperModel() {
+    return await loadWhisperModelWithProgress();
+}
+
+// Voice recognition functions
 async function startListening() {
     if (!whisperModule) {
-        addDebugLog('Whisper module not loaded - cannot start listening', 'ERROR');
-        return;
+        addDebugLog('❌ Whisper module not loaded', 'ERROR');
+        return false;
     }
-
-    // Check microphone status first
+    
     try {
-        const micStatus = await whisperModule.checkMicrophoneStatus();
-        if (!micStatus.available) {
-            addDebugLog(`Microphone not available: ${micStatus.message}`, 'ERROR');
-            alert('Microphone not available. Please check your microphone permissions and try again.');
-            return;
+        addDebugLog('🎤 Starting voice recognition...', 'INFO');
+        
+        // Check if there's a state mismatch and reset if needed
+        if (whisperModule.getStatus) {
+            const status = whisperModule.getStatus();
+            if (status.isRecording && !status.isLiveTranscribing) {
+                addDebugLog('⚠️ State mismatch detected, resetting WhisperModule...', 'WARN');
+                whisperModule.resetState();
+            }
         }
-    } catch (error) {
-        addDebugLog(`Error checking microphone status: ${error.message}`, 'ERROR');
-    }
-
-    addDebugLog('Starting voice recording...', 'DEBUG');
-    try {
+        
+        // Use the WhisperModule's speech recognition
         await whisperModule.startRecording();
-        isListening = true;
-        addDebugLog('Voice recording started successfully', 'INFO');
-        updateUI();
         
-        // Start periodic check for voice recognition status
-        startRecognitionCheck();
+        // Set up event listeners for the WhisperModule
+        if (whisperModule.speechRecognition) {
+            whisperModule.speechRecognition.onstart = () => {
+                isListening = true;
+                addDebugLog('✅ Voice recognition started', 'INFO');
+                updateUI();
+            };
+            
+            whisperModule.speechRecognition.onresult = (event) => {
+                let finalTranscript = '';
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+                
+                if (finalTranscript) {
+                    addVoiceTranscript(finalTranscript, false);
+                    handleVoiceCommand(finalTranscript);
+                    lastRecognizedCommand = finalTranscript;
+                    document.getElementById('last-command').textContent = finalTranscript;
+                }
+                
+                if (interimTranscript) {
+                    addVoiceTranscript(interimTranscript, true);
+                    document.getElementById('live-speech').textContent = interimTranscript;
+                }
+            };
+            
+            whisperModule.speechRecognition.onerror = (event) => {
+                addDebugLog(`❌ Recognition error: ${event.error}`, 'ERROR');
+                isListening = false;
+                updateUI();
+            };
+            
+            whisperModule.speechRecognition.onend = () => {
+                isListening = false;
+                addDebugLog('🛑 Voice recognition stopped', 'INFO');
+        updateUI();
+            };
+        }
+        
+        return true;
+        
     } catch (error) {
-        addDebugLog(`Failed to start recording: ${error.message}`, 'ERROR');
-        console.error('[ERROR] Failed to start recording:', error);
-        
-        // Provide user-friendly error message
-        if (error.message.includes('permission')) {
-            alert('Microphone permission denied. Please allow microphone access and try again.');
-        } else if (error.message.includes('not supported')) {
-            alert('Speech recognition is not supported in this browser. Please use Chrome, Firefox, or Safari.');
-        } else {
-            alert('Failed to start voice recognition. Please check your microphone and try again.');
-        }
+        addDebugLog(`❌ Error starting recognition: ${error.message}`, 'ERROR');
+        return false;
     }
 }
 
-function stopListening() {
-    if (whisperModule && isListening) {
-        addDebugLog('Stopping voice recording...', 'DEBUG');
-        whisperModule.stopRecording();
+async function stopListening() {
+    if (whisperModule) {
+        await whisperModule.stopRecording();
+    }
         isListening = false;
-        currentInterimText = '';
-        addDebugLog('Voice recording stopped', 'INFO');
-        
-        // Stop periodic check
-        stopRecognitionCheck();
-        
+    addDebugLog('🛑 Stopping voice recognition', 'INFO');
         updateUI();
+}
+
+// Advanced voice command handling with Llama DSL conversion
+async function handleVoiceCommand(text) {
+    const command = text.toLowerCase().trim();
+    addDebugLog(`🎯 Processing command: "${command}"`, 'INFO');
+    
+    try {
+        // Try to convert to DSL using Llama
+        if (llamaIntegration && llamaIntegration.isLoaded) {
+            addDebugLog(`🦙 Converting to DSL using TinyLlama...`, 'INFO');
+            
+            const dslCommand = await llamaIntegration.convertToDSL(text);
+            addDebugLog(`✅ DSL Command: ${dslCommand}`, 'INFO');
+            
+            // Add to DSL commands list
+            addDSLCommand(dslCommand, text);
+            
+            // Execute the DSL command
+            if (dslExecutor) {
+                const result = await dslExecutor.executeDSL(dslCommand);
+                addDebugLog(`🔧 DSL Execution: ${result.success ? 'SUCCESS' : 'FAILED'}`, result.success ? 'INFO' : 'ERROR');
+                
+                if (result.success) {
+                    speak(result.output);
+                } else {
+                    speak('I encountered an error processing that command');
+                }
+            } else {
+                addDebugLog(`❌ DSL Executor not available`, 'ERROR');
+                fallbackToBasicCommands(text);
+            }
+        } else {
+            addDebugLog(`⚠️ Llama not loaded, using fallback commands`, 'WARN');
+            fallbackToBasicCommands(text);
+        }
+    } catch (error) {
+        addDebugLog(`❌ Error in voice command processing: ${error.message}`, 'ERROR');
+        fallbackToBasicCommands(text);
+    }
+}
+
+// Fallback to basic command handling
+function fallbackToBasicCommands(text) {
+    const command = text.toLowerCase().trim();
+    
+    if (command.includes('go to returns') || command.includes('open returns')) {
+        navigateToSection('returns');
+        speak('Navigating to returns section');
+    } else if (command.includes('go to replacements') || command.includes('open replacements')) {
+        navigateToSection('replacements');
+        speak('Navigating to replacements section');
+    } else if (command.includes('go to tracking') || command.includes('open tracking')) {
+        navigateToSection('tracking');
+        speak('Navigating to tracking section');
+    } else if (command.includes('go to contact') || command.includes('open contact')) {
+        navigateToSection('contact');
+        speak('Navigating to contact section');
+    } else if (command.includes('submit return') || command.includes('submit return form')) {
+        submitReturnForm();
+        speak('Submitting return form');
+    } else if (command.includes('submit replacement') || command.includes('submit replacement form')) {
+        submitReplacementForm();
+        speak('Submitting replacement form');
+    } else if (command.includes('track request') || command.includes('track my request')) {
+        trackRequest();
+        speak('Tracking your request');
     } else {
-        addDebugLog('Cannot stop recording - not currently recording', 'WARN');
+        addDebugLog(`❓ Unrecognized command: "${command}"`, 'WARN');
+        speak('I did not understand that command. Please try again.');
     }
 }
 
-// Dynamic Command Mapping System
-let dynamicCommandMap = [];
-
-function scanUIForActions() {
-    dynamicCommandMap = [];
-    // Buttons
-    document.querySelectorAll('button, input[type="button"], input[type="submit"]').forEach(btn => {
-        const label = (btn.innerText || btn.value || btn.getAttribute('aria-label') || '').trim();
-        if (!label) return;
-        const id = btn.id || '';
-        // Generate command patterns
-        [
-            `click ${label.toLowerCase()}`,
-            `press ${label.toLowerCase()}`,
-            `${label.toLowerCase()}`
-        ].forEach(pattern => {
-            dynamicCommandMap.push({ pattern, action: () => btn.click(), type: 'button', label });
-        });
-        if (id) {
-            dynamicCommandMap.push({ pattern: `click ${id.toLowerCase()}`, action: () => btn.click(), type: 'button', label });
-        }
-    });
-    // Navigation links
-    document.querySelectorAll('.nav-link').forEach(link => {
-        const label = (link.innerText || '').trim();
-        const href = link.getAttribute('href') || '';
-        if (!label || !href) return;
-        [
-            `go to ${label.toLowerCase()}`,
-            `open ${label.toLowerCase()}`,
-            `show ${label.toLowerCase()}`,
-            `${label.toLowerCase()}`
-        ].forEach(pattern => {
-            dynamicCommandMap.push({ pattern, action: () => link.click(), type: 'nav', label });
-        });
-    });
-    // Form fields (for filling)
-    document.querySelectorAll('input, textarea, select').forEach(field => {
-        const label = (document.querySelector(`label[for="${field.id}"]`)?.innerText || field.placeholder || field.name || '').trim();
-        if (!label) return;
-        const id = field.id || field.name || '';
-        // e.g., "fill order number 12345"
-        dynamicCommandMap.push({
-            pattern: new RegExp(`fill ${label.toLowerCase()} (.+)`),
-            action: (val) => { field.value = val; field.dispatchEvent(new Event('input')); },
-            type: 'field', label
-        });
-        if (id) {
-            dynamicCommandMap.push({
-                pattern: new RegExp(`fill ${id.toLowerCase()} (.+)`),
-                action: (val) => { field.value = val; field.dispatchEvent(new Event('input')); },
-                type: 'field', label
-            });
-        }
-    });
-}
-
-function showDynamicCommands() {
-    const debugPanel = document.getElementById('debug-panel');
-    if (!debugPanel) return;
-    debugPanel.innerHTML =
-        '<ul>' +
-        dynamicCommandMap.map(cmd => `<li>${typeof cmd.pattern === 'string' ? cmd.pattern : cmd.pattern.toString()}</li>`).join('') +
-        '</ul>';
-}
-
-function handleVoiceCommand(result) {
-    // Simplified - just log the transcription
-    const { text, action } = typeof result === 'string' ? { text: result, action: '' } : result;
-    addDebugLog(`Voice transcription: "${text}"`, 'INFO');
-    lastRecognizedCommand = text;
-    
-    // Just speak back what was heard for confirmation
-    if (isSpeechEnabled) {
-        speak(`I heard: "${text}"`);
-    }
-    
-    // Update UI
-    updateUI();
-}
-
+// UI navigation
 function navigateToSection(sectionName) {
-    addDebugLog(`Navigating to section: ${sectionName}`, 'ACTION');
-    if (!sectionName) {
-        addDebugLog('No section name provided', 'WARN');
-        speak('No section name provided');
-        return;
-    }
-    // Map common voice command section names to actual section IDs
-    const sectionMap = {
-        'return': 'returns',
-        'returns': 'returns',
-        'replacement': 'replacements',
-        'replacements': 'replacements',
-        'track': 'tracking',
-        'tracking': 'tracking',
-        'status': 'tracking',
-        'contact': 'contact',
-        'support': 'contact',
-        'help': 'contact',
-        'home': 'returns',
-    };
-    const normalized = sectionName.trim().toLowerCase();
-    const targetId = sectionMap[normalized] || sectionMap[normalized.replace(/s$/, '')] || normalized;
-    // Find the nav link and click it
-    const navLinks = document.querySelectorAll('.nav-link');
-    let found = false;
-    for (const link of navLinks) {
-        const href = link.getAttribute('href').replace('#', '').toLowerCase();
-        if (href === targetId) {
-            link.click();
-            speak(`Navigated to ${href} section`);
-            found = true;
-            break;
+    // Update active nav link
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href') === `#${sectionName}`) {
+            link.classList.add('active');
         }
-    }
-    if (!found) {
-        addDebugLog(`Section ${sectionName} not found`, 'WARN');
-        speak(`Section ${sectionName} not found`);
-    }
+    });
+    
+    // Show target section
+    document.querySelectorAll('.section').forEach(section => {
+        section.classList.remove('active');
+    });
+    document.getElementById(sectionName).classList.add('active');
 }
 
+// Form submission functions
 function submitReturnForm() {
-    addDebugLog('Executing: Submit return form action', 'ACTION');
-    const returnForm = document.querySelector('.return-form');
-    if (returnForm) {
-        returnForm.dispatchEvent(new Event('submit'));
-        speak('Return form submitted successfully');
-    } else {
-        addDebugLog('Return form not found', 'WARN');
-        speak('Return form not found. Please navigate to the returns section first.');
+    const form = document.querySelector('.return-form');
+    if (form) {
+        form.dispatchEvent(new Event('submit'));
     }
 }
 
 function submitReplacementForm() {
-    addDebugLog('Executing: Submit replacement form action', 'ACTION');
-    const replacementForm = document.querySelector('.replacement-form');
-    if (replacementForm) {
-        replacementForm.dispatchEvent(new Event('submit'));
-        speak('Replacement form submitted successfully');
-    } else {
-        addDebugLog('Replacement form not found', 'WARN');
-        speak('Replacement form not found. Please navigate to the replacements section first.');
+    const form = document.querySelector('.replacement-form');
+    if (form) {
+        form.dispatchEvent(new Event('submit'));
     }
 }
 
 function trackRequest() {
-    addDebugLog('Executing: Track request action', 'ACTION');
-    const trackingInput = document.getElementById('trackingNumber');
-    if (trackingInput && trackingInput.value) {
-        if (typeof window.trackRequest === 'function') {
-            window.trackRequest();
-            speak('Tracking request submitted');
+    const trackingNumber = document.getElementById('trackingNumber');
+    if (trackingNumber && trackingNumber.value) {
+        document.getElementById('trackingResults').style.display = 'block';
         } else {
-            addDebugLog('Track request function not found', 'WARN');
-            speak('Please enter a tracking number first');
-        }
-    } else {
-        addDebugLog('Tracking number not entered', 'WARN');
-        speak('Please enter a tracking number first');
+        alert('Please enter a tracking number.');
     }
 }
 
-function fillFormField(param) {
-    const [fieldName, value] = param.split(':');
-    addDebugLog(`Filling field: ${fieldName} with value: ${value}`, 'ACTION');
-    
-    const field = document.getElementById(fieldName);
-    if (field) {
-        field.value = value;
-        field.focus();
-        speak(`Filled ${fieldName} with ${value}`);
-    } else {
-        addDebugLog(`Field ${fieldName} not found`, 'WARN');
-        speak(`Field ${fieldName} not found`);
-    }
-}
-
-function clickElementByText(text) {
-    addDebugLog(`Attempting to click element with text: "${text}"`, 'DEBUG');
-    const elements = document.querySelectorAll('button, a, input[type="button"], input[type="submit"]');
-    addDebugLog(`Found ${elements.length} clickable elements`, 'DEBUG');
-    
-    let clicked = false;
-    elements.forEach((el, index) => {
-        addDebugLog(`Checking element ${index + 1}: "${el.innerText}"`, 'DEBUG');
-        if (el.innerText.toLowerCase().includes(text.toLowerCase())) {
-            el.click();
-            clicked = true;
-            addDebugLog(`Clicked element: "${el.innerText}"`, 'INFO');
-            console.log('[INFO] Clicked element:', el);
-            speak(`Clicked ${el.innerText}`);
-        }
-    });
-    
-    if (!clicked) {
-        addDebugLog(`No element found to click with text: "${text}"`, 'WARN');
-        console.log('[WARN] No element found to click with text:', text);
-        speak(`No element found with text: ${text}`);
-    }
-}
-
+// Speech synthesis
 function speak(text) {
-    addDebugLog(`Speaking text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, 'DEBUG');
-    console.log('[DEBUG] Speaking text:', text);
-    if (!isSpeechEnabled) {
-        addDebugLog('Speech synthesis skipped due to disabled setting', 'DEBUG');
-        return;
-    }
+    if (!isSpeechEnabled) return;
+    
+    if ('speechSynthesis' in window) {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.rate = 0.9;
     utterance.pitch = 1.0;
-    
-    utterance.onstart = () => addDebugLog('Speech synthesis started', 'DEBUG');
-    utterance.onend = () => addDebugLog('Speech synthesis ended', 'DEBUG');
-    utterance.onerror = (event) => addDebugLog(`Speech synthesis error: ${event.error}`, 'ERROR');
-    
+        utterance.volume = 0.8;
     speechSynthesis.speak(utterance);
+    }
 }
 
+// UI update functions
 async function updateMicrophoneStatus() {
     const micStatusElement = document.getElementById('mic-status');
     if (!micStatusElement) return;
     
     try {
-        if (whisperModule) {
-            const status = await whisperModule.checkMicrophoneStatus();
-            if (status.available) {
-                micStatusElement.textContent = '✅ Available';
-                micStatusElement.style.color = 'green';
-            } else {
-                micStatusElement.textContent = '❌ Not Available';
-                micStatusElement.style.color = 'red';
-            }
-        } else {
-            micStatusElement.textContent = '⏳ Loading...';
-            micStatusElement.style.color = 'orange';
-        }
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+        micStatusElement.textContent = 'Available';
+        micStatusElement.className = 'status-ok';
     } catch (error) {
-        micStatusElement.textContent = '❌ Error';
-        micStatusElement.style.color = 'red';
-        addDebugLog(`Error updating microphone status: ${error.message}`, 'ERROR');
+        micStatusElement.textContent = 'Not Available';
+        micStatusElement.className = 'status-error';
+        addDebugLog(`❌ Microphone not available: ${error.message}`, 'ERROR');
     }
 }
 
 function updateUI() {
-    const statusElement = document.getElementById('voice-status');
-    const toggleButton = document.getElementById('voice-toggle-btn');
-    const forceRestartButton = document.getElementById('force-restart-btn');
-    const lastCommandElement = document.getElementById('last-command');
-    const liveSpeechElement = document.getElementById('live-speech');
+    const voiceToggleBtn = document.getElementById('voice-toggle-btn');
+    const voiceStatus = document.getElementById('voice-status');
+    const forceRestartBtn = document.getElementById('force-restart-btn');
+    const diagnoseBtn = document.getElementById('diagnose-btn');
     
+    if (voiceToggleBtn) {
+        voiceToggleBtn.textContent = isListening ? 'Stop Listening' : 'Start Listening';
+        voiceToggleBtn.className = isListening ? 'btn-danger' : 'btn-primary';
+    }
+    
+    if (voiceStatus) {
+        voiceStatus.textContent = isListening ? 'Listening' : 'Idle';
+        voiceStatus.className = isListening ? 'status-listening' : 'status-idle';
+    }
+    
+    if (forceRestartBtn) {
+        forceRestartBtn.style.display = isListening ? 'inline-block' : 'none';
+    }
+    
+    if (diagnoseBtn) {
+        diagnoseBtn.style.display = isListening ? 'inline-block' : 'none';
+    }
+}
+
+// Event handlers
+async function toggleListening() {
+        if (isListening) {
+        await stopListening();
+        } else {
+        await startListening();
+    }
+}
+
+async function forceRestartRecognition() {
+    addDebugLog('🔄 Force restarting recognition...', 'INFO');
+    
+    // Use WhisperModule's force restart if available
+    if (whisperModule && typeof whisperModule.forceRestart === 'function') {
+        whisperModule.forceRestart();
+        addDebugLog('✅ WhisperModule force restart completed', 'INFO');
+    }
+    
+    // Reset main application state
+    isListening = false;
+    
+    // Wait a moment then restart
+    setTimeout(async () => {
+        await startListening();
+    }, 1000);
+}
+
+async function diagnoseRecognition() {
+    addDebugLog('🔍 Running recognition diagnostics...', 'INFO');
+    
+    // Check microphone
+    await updateMicrophoneStatus();
+    
+    // Check whisper module
+    if (!whisperModule) {
+        addDebugLog('❌ Whisper module not loaded', 'ERROR');
+    } else {
+        addDebugLog('✅ Whisper module loaded', 'INFO');
+        
+        // Get detailed status
+        if (whisperModule.getStatus) {
+            const status = whisperModule.getStatus();
+            addDebugLog(`🔍 WhisperModule Status:`, 'INFO');
+            addDebugLog(`  - Initialized: ${status.isInitialized}`, 'INFO');
+            addDebugLog(`  - Recording: ${status.isRecording}`, 'INFO');
+            addDebugLog(`  - Live Transcribing: ${status.isLiveTranscribing}`, 'INFO');
+            addDebugLog(`  - Audio Stream: ${status.hasAudioStream}`, 'INFO');
+            addDebugLog(`  - Speech Recognition: ${status.hasSpeechRecognition}`, 'INFO');
+        }
+        
+        // Use WhisperModule's diagnostic functions
+        if (whisperModule.diagnoseRecognitionIssue) {
+            const diagnosis = await whisperModule.diagnoseRecognitionIssue();
+            addDebugLog(`🔍 Diagnosis: ${diagnosis.issue} - ${diagnosis.message}`, 'INFO');
+        }
+        
+        if (whisperModule.checkMicrophoneStatus) {
+            const micStatus = await whisperModule.checkMicrophoneStatus();
+            addDebugLog(`🎤 Microphone status: ${micStatus.available ? 'Available' : 'Not available'}`, 'INFO');
+        }
+    }
+    
+    // Check speech synthesis
+    if ('speechSynthesis' in window) {
+        addDebugLog('✅ Speech synthesis available', 'INFO');
+    } else {
+        addDebugLog('❌ Speech synthesis not available', 'ERROR');
+    }
+}
+
+function toggleSpeech() {
+    isSpeechEnabled = !isSpeechEnabled;
+    // Update global variable
+    window.isSpeechEnabled = isSpeechEnabled;
+    
+    const speechToggleBtn = document.getElementById('speech-toggle-btn');
+    if (speechToggleBtn) {
+        speechToggleBtn.textContent = `🔊 Speech: ${isSpeechEnabled ? 'ON' : 'OFF'}`;
+        speechToggleBtn.classList.toggle('off', !isSpeechEnabled);
+    }
+    
+    // Stop any ongoing speech when turning off
+    if (!isSpeechEnabled && 'speechSynthesis' in window) {
+        speechSynthesis.cancel();
+    }
+    
+    addDebugLog(`🔊 Speech ${isSpeechEnabled ? 'enabled' : 'disabled'}`, 'INFO');
+}
+
+// DSL command tracking functions
+function addDSLCommand(dslCommand, originalText) {
+    const timestamp = new Date().toLocaleTimeString();
+    const commandEntry = {
+        timestamp: timestamp,
+        originalText: originalText,
+        dslCommand: dslCommand,
+        success: false
+    };
+    
+    dslCommands.push(commandEntry);
+    
+    // Keep only last 20 commands
+    if (dslCommands.length > 20) {
+        dslCommands = dslCommands.slice(-20);
+    }
+    
+        updateDSLCommandsUI();
+}
+
+function updateDSLCommandsUI() {
+    const dslCommandsElement = document.getElementById('dsl-commands');
+    if (!dslCommandsElement) return;
+    
+    dslCommandsElement.innerHTML = '';
+    
+    dslCommands.forEach(entry => {
+        const entryDiv = document.createElement('div');
+        entryDiv.className = 'dsl-command-entry';
+        entryDiv.innerHTML = `
+            <div class="dsl-command-header">
+                <span class="dsl-command-timestamp">${entry.timestamp}</span>
+                <span class="dsl-command-action ${entry.success ? 'success' : 'error'}">${entry.success ? 'SUCCESS' : 'PENDING'}</span>
+                    </div>
+            <div class="dsl-command-content">
+                <div class="dsl-command-text"><strong>Original:</strong> ${entry.originalText}</div>
+                <div class="dsl-command-dsl"><strong>DSL:</strong> ${entry.dslCommand}</div>
+            </div>
+        `;
+        dslCommandsElement.appendChild(entryDiv);
+    });
+    
+    // Scroll to bottom
+    dslCommandsElement.scrollTop = dslCommandsElement.scrollHeight;
+}
+
+function clearDSLCommands() {
+    dslCommands = [];
+    updateDSLCommandsUI();
+}
+
+// Initialize Llama and DSL components with progress
+async function initializeLlamaAndDSLWithProgress() {
+    try {
+        addDebugLog('🦙 Initializing Llama integration...', 'INFO');
+        updateLlamaProgress(20, 'Checking Llama integration...');
+        
+        // Initialize Llama integration
+        if (typeof LlamaIntegration !== 'undefined') {
+            updateLlamaProgress(40, 'Creating Llama integration...');
+            llamaIntegration = new LlamaIntegration();
+            
+            updateLlamaProgress(60, 'Loading TinyLlama model...');
+            await llamaIntegration.loadModel();
+            addDebugLog('✅ Llama integration initialized', 'INFO');
+            updateLlamaProgress(80, 'Llama model loaded...');
+        } else {
+            addDebugLog('❌ LlamaIntegration class not available', 'ERROR');
+            updateLlamaProgress(80, 'Using mock Llama...');
+        }
+        
+        // Initialize DSL executor
+        updateLlamaProgress(90, 'Initializing DSL executor...');
+        if (typeof DSLExecutor !== 'undefined') {
+            dslExecutor = new DSLExecutor();
+            addDebugLog('✅ DSL executor initialized', 'INFO');
+            } else {
+            addDebugLog('❌ DSLExecutor class not available', 'ERROR');
+        }
+        
+    } catch (error) {
+        addDebugLog(`❌ Error initializing Llama/DSL: ${error.message}`, 'ERROR');
+    }
+}
+
+// Original function for backward compatibility
+async function initializeLlamaAndDSL() {
+    return await initializeLlamaAndDSLWithProgress();
+}
+
+// Model loading progress tracking
+let whisperProgress = 0;
+let llamaProgress = 0;
+let overallProgress = 0;
+
+// Update progress functions
+function updateWhisperProgress(progress, status) {
+    whisperProgress = progress;
+    const progressBar = document.getElementById('whisper-progress');
+    const statusElement = document.getElementById('whisper-status');
+    
+    if (progressBar) {
+        progressBar.style.width = `${progress}%`;
+    }
     if (statusElement) {
-        if (isListening) {
-            statusElement.textContent = '🔄 Continuous Listening';
-        } else {
-            statusElement.textContent = 'Idle';
-        }
+        statusElement.textContent = status;
     }
     
-    if (toggleButton) {
-        if (isListening) {
-            toggleButton.textContent = 'Stop Listening';
-            toggleButton.className = 'btn btn-danger';
-        } else {
-            toggleButton.textContent = 'Start Listening';
-            toggleButton.className = 'btn btn-primary';
-        }
-    }
-    
-    // Show/hide force restart and diagnose buttons
-    if (forceRestartButton) {
-        if (isListening) {
-            forceRestartButton.style.display = 'inline-block';
-        } else {
-            forceRestartButton.style.display = 'none';
-        }
-    }
-    
-    const diagnoseButton = document.getElementById('diagnose-btn');
-    if (diagnoseButton) {
-        // Always show diagnose button when module is loaded
-        diagnoseButton.style.display = whisperModule ? 'inline-block' : 'none';
-    }
-    
-    if (lastCommandElement) {
-        lastCommandElement.textContent = lastRecognizedCommand ? lastRecognizedCommand : '';
-    }
-    
-    if (liveSpeechElement) {
-        liveSpeechElement.textContent = currentInterimText ? currentInterimText : '';
-    }
-    
-    // Update microphone status
-    updateMicrophoneStatus();
+    updateOverallProgress();
 }
 
-// Add periodic check for voice recognition status
-let recognitionCheckInterval = null;
-
-function startRecognitionCheck() {
-    if (recognitionCheckInterval) {
-        clearInterval(recognitionCheckInterval);
+function updateLlamaProgress(progress, status) {
+    llamaProgress = progress;
+    const progressBar = document.getElementById('llama-progress');
+    const statusElement = document.getElementById('llama-status');
+    
+    if (progressBar) {
+        progressBar.style.width = `${progress}%`;
+    }
+    if (statusElement) {
+        statusElement.textContent = status;
     }
     
-    recognitionCheckInterval = setInterval(() => {
-        if (isListening && whisperModule) {
-            // Check if recognition is still active
-            const isActive = whisperModule.isLiveTranscribing;
-            if (!isActive) {
-                addDebugLog('Voice recognition appears to have stopped unexpectedly, restarting...', 'WARN');
-                whisperModule.forceRestart();
+    updateOverallProgress();
+}
+
+function updateOverallProgress() {
+    overallProgress = Math.round((whisperProgress + llamaProgress) / 2);
+    const overallElement = document.getElementById('overall-progress-text');
+    if (overallElement) {
+        overallElement.textContent = `${overallProgress}%`;
+    }
+    
+    // Hide loading overlay when both models are loaded
+    if (whisperProgress >= 100 && llamaProgress >= 100) {
+        setTimeout(() => {
+            const loadingOverlay = document.getElementById('loading-overlay');
+            if (loadingOverlay) {
+                loadingOverlay.classList.add('hidden');
             }
-        }
-    }, 10000); // Check every 10 seconds
-}
-
-function stopRecognitionCheck() {
-    if (recognitionCheckInterval) {
-        clearInterval(recognitionCheckInterval);
-        recognitionCheckInterval = null;
+        }, 1000); // Small delay to show 100% completion
     }
 }
 
-// Initialize the application
-document.addEventListener('DOMContentLoaded', async () => {
-    addDebugLog('DOM loaded, initializing application...', 'DEBUG');
+// Initialize application with model loading
+async function initializeApp() {
+    addDebugLog('🚀 Initializing Customer Care Application', 'INFO');
+    
+    // Start with loading progress
+    updateWhisperProgress(0, 'Initializing...');
+    updateLlamaProgress(0, 'Initializing...');
     
     // Load data
     await loadCustomerData();
     await loadReturnsData();
     
-    // Render UI components
-    renderCustomerInfo();
-    renderOrderHistory();
-    renderReturnsHistory();
-    populateReturnForm();
-    populateReturnReasons();
-    
-    // Load voice module
-    loadWhisperModel();
-
-    scanUIForActions();
-    showDynamicCommands();
-    
-    // Add UI elements if they don't exist
-    if (!document.getElementById('voiceControls')) {
-        const controls = document.createElement('div');
-        controls.id = 'voiceControls';
-        controls.innerHTML = `
-            <div id="voice-control-panel" class="voice-panel">
-                <div class="voice-panel-header" id="voice-panel-header">
-                    <span>🎤 Voice Transcription</span>
-                    <button id="voice-panel-minimize" class="voice-panel-minimize" title="Minimize">_</button>
-                </div>
-                <div class="voice-panel-body" id="voice-panel-body">
-                    <div>Status: <span id="voice-status">Idle</span></div>
-                    <div>Microphone: <span id="mic-status">Checking...</span></div>
-                    <button id="voice-toggle-btn">Start Listening</button>
-                    <button id="force-restart-btn" style="display: none;">🔄 Force Restart</button>
-                    <button id="diagnose-btn" style="display: none;">🔍 Diagnose</button>
-                    <button id="speech-toggle-btn" class="speech-toggle-btn">🔊 Speech: ON</button>
-                    <div>Last Command: <span id="last-command"></span></div>
-                    <div>Live Speech: <span id="live-speech"></span></div>
-                    <div id="voice-commands-section" class="voice-commands-section">
-                        <div class="voice-commands-title">Available Voice Commands</div>
-                        <div id="debug-panel" class="voice-commands-list"></div>
-                    </div>
-                    <div id="voice-transcript-section" class="voice-transcript-section">
-                        <div class="voice-transcript-header">
-                            <div class="voice-transcript-title">📝 Continuous Voice Transcript</div>
-                            <button id="clear-transcript-btn" class="clear-transcript-btn" title="Clear transcript">🗑️</button>
-                        </div>
-                        <div id="voice-transcript" class="voice-transcript-content"></div>
-                    </div>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(controls);
-        addDebugLog('Voice control UI initialized', 'INFO');
+    // Load Whisper model with progress tracking
+    updateWhisperProgress(10, 'Loading Whisper module...');
+    const whisperLoaded = await loadWhisperModelWithProgress();
+    if (!whisperLoaded) {
+        addDebugLog('⚠️ Whisper module failed to load, using fallback speech recognition', 'WARN');
+        updateWhisperProgress(100, 'Using fallback mode');
+        setupFallbackSpeechRecognition();
+    } else {
+        updateWhisperProgress(100, 'Loaded successfully');
     }
     
-    // Navigation functionality
-    document.querySelectorAll('.nav-link').forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const targetId = link.getAttribute('href').substring(1);
-            
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
-            link.classList.add('active');
-            
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.remove('active');
-            });
-            document.getElementById(targetId).classList.add('active');
-        });
-    });
-
-    // Form submission handlers
-    document.querySelector('.return-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        alert('Return request submitted successfully! You will receive a confirmation email shortly.');
-    });
-
-    document.querySelector('.replacement-form').addEventListener('submit', (e) => {
-        e.preventDefault();
-        alert('Replacement request submitted successfully! Our team will review and contact you within 24 hours.');
-    });
-
-    // Add drag and minimize logic to the voice control panel
-    const voicePanel = document.getElementById('voice-control-panel');
-    const header = document.getElementById('voice-panel-header');
-    const minimizeBtn = document.getElementById('voice-panel-minimize');
-    const body = document.getElementById('voice-panel-body');
+    // Initialize Llama and DSL components with progress tracking
+    updateLlamaProgress(10, 'Loading Llama integration...');
+    await initializeLlamaAndDSLWithProgress();
+    updateLlamaProgress(100, 'Loaded successfully');
     
-    // Add click handler for the voice toggle button
+    // Update microphone status
+    await updateMicrophoneStatus();
+    
+    // Set up event listeners
     const voiceToggleBtn = document.getElementById('voice-toggle-btn');
     if (voiceToggleBtn) {
         voiceToggleBtn.addEventListener('click', toggleListening);
     }
 
-    // Add event listeners for wake word system
-    document.addEventListener('wakeWordDetected', (event) => {
-        addDebugLog(`Wake word "${event.detail.wakeWord}" detected! Listening for commands...`, 'INFO');
-        speak(`Voice pilot activated. How can I help you?`);
-        updateUI();
-    });
-
-    document.addEventListener('returnToWakeWord', (event) => {
-        addDebugLog(`Returning to wake word mode. Say "${event.detail.wakeWord}" to activate.`, 'INFO');
-        updateUI();
-    });
-
-    // Add click handler for the speech toggle button
+    const forceRestartBtn = document.getElementById('force-restart-btn');
+    if (forceRestartBtn) {
+        forceRestartBtn.addEventListener('click', forceRestartRecognition);
+    }
+    
+    const diagnoseBtn = document.getElementById('diagnose-btn');
+    if (diagnoseBtn) {
+        diagnoseBtn.addEventListener('click', diagnoseRecognition);
+    }
+    
     const speechToggleBtn = document.getElementById('speech-toggle-btn');
     if (speechToggleBtn) {
         speechToggleBtn.addEventListener('click', toggleSpeech);
     }
 
-    // Add click handler for the clear transcript button
     const clearTranscriptBtn = document.getElementById('clear-transcript-btn');
     if (clearTranscriptBtn) {
         clearTranscriptBtn.addEventListener('click', clearVoiceTranscript);
     }
 
-    // Add click handler for the force restart button
-    const forceRestartBtn = document.getElementById('force-restart-btn');
-    if (forceRestartBtn) {
-        forceRestartBtn.addEventListener('click', forceRestartRecognition);
+    const clearDSLBtn = document.getElementById('clear-dsl-btn');
+    if (clearDSLBtn) {
+        clearDSLBtn.addEventListener('click', clearDSLCommands);
     }
 
-    // Add click handler for the diagnose button
-    const diagnoseBtn = document.getElementById('diagnose-btn');
-    if (diagnoseBtn) {
-        diagnoseBtn.addEventListener('click', diagnoseRecognition);
+    // Voice panel minimize functionality
+    const voicePanelHeader = document.getElementById('voice-panel-header');
+    const voicePanelBody = document.getElementById('voice-panel-body');
+    const minimizeBtn = document.getElementById('voice-panel-minimize');
+    
+    if (minimizeBtn && voicePanelBody) {
+        minimizeBtn.addEventListener('click', () => {
+            voicePanelBody.style.display = voicePanelBody.style.display === 'none' ? 'block' : 'none';
+            minimizeBtn.textContent = voicePanelBody.style.display === 'none' ? '□' : '_';
+        });
     }
-
-    // Drag logic
-    let isDragging = false, offsetX = 0, offsetY = 0;
-    header.style.cursor = 'move';
-    header.onmousedown = function(e) {
-      isDragging = true;
-      offsetX = e.clientX - voicePanel.offsetLeft;
-      offsetY = e.clientY - voicePanel.offsetTop;
-      document.body.style.userSelect = 'none';
-    };
-    document.onmousemove = function(e) {
-      if (isDragging) {
-        voicePanel.style.left = (e.clientX - offsetX) + 'px';
-        voicePanel.style.top = (e.clientY - offsetY) + 'px';
-        voicePanel.style.right = 'auto';
-        voicePanel.style.bottom = 'auto';
-      }
-    };
-    document.onmouseup = function() {
-      isDragging = false;
-      document.body.style.userSelect = '';
-    };
-    // Minimize/maximize logic
-    minimizeBtn.onclick = function() {
-      if (body.style.display !== 'none') {
-        body.style.display = 'none';
-        minimizeBtn.textContent = '▢';
-        minimizeBtn.title = 'Maximize';
-      } else {
-        body.style.display = '';
-        minimizeBtn.textContent = '_';
-        minimizeBtn.title = 'Minimize';
-      }
-    };
-});
-
-async function toggleListening() {
-    addDebugLog(`Toggle listening called - current state: ${isListening}`, 'DEBUG');
-    if (isListening) {
-        stopListening();
-    } else {
-        await startListening();
-    }
+    
+    addDebugLog('✅ Application initialized successfully', 'INFO');
+    updateUI();
 }
 
-function forceRestartRecognition() {
-    if (whisperModule && isListening) {
-        addDebugLog('Force restarting voice recognition', 'INFO');
-        whisperModule.forceRestart();
-        updateUI();
-    } else {
-        addDebugLog('Cannot force restart - not currently listening', 'WARN');
-    }
-}
-
-async function diagnoseRecognition() {
-    if (whisperModule) {
-        addDebugLog('Diagnosing voice recognition issues...', 'INFO');
-        const diagnosis = await whisperModule.diagnoseRecognitionIssue();
-        addDebugLog(`Diagnosis result: ${diagnosis.issue} - ${diagnosis.message}`, 'INFO');
+// Fallback speech recognition setup
+function setupFallbackSpeechRecognition() {
+    addDebugLog('🔄 Setting up fallback speech recognition...', 'INFO');
+    
+    // Create a simple fallback whisper module
+    whisperModule = {
+        isInitialized: true,
+        isRecording: false,
+        speechRecognition: null,
         
-        // Show diagnosis in UI
-        const statusElement = document.getElementById('voice-status');
-        if (statusElement) {
-            statusElement.textContent = `Issue: ${diagnosis.issue}`;
-            statusElement.style.color = 'red';
+        async startRecording() {
+            addDebugLog('🎤 Starting fallback speech recognition...', 'INFO');
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                throw new Error('Speech recognition not supported in this browser');
+            }
+            
+            this.speechRecognition = new SpeechRecognition();
+            this.speechRecognition.continuous = true;
+            this.speechRecognition.interimResults = true;
+            this.speechRecognition.lang = 'en-US';
+            
+            this.speechRecognition.start();
+            this.isRecording = true;
+        },
+        
+        async stopRecording() {
+            addDebugLog('🛑 Stopping fallback speech recognition...', 'INFO');
+            
+            if (this.speechRecognition) {
+                this.speechRecognition.stop();
+            }
+            this.isRecording = false;
+        },
+        
+        async checkMicrophoneStatus() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                return { available: true };
+            } catch (error) {
+                return { available: false, message: error.message };
+            }
         }
-        
-        // Provide user-friendly message
-        let userMessage = '';
-        switch (diagnosis.issue) {
-            case 'microphone_not_available':
-                userMessage = 'No microphone found. Please check your microphone connection.';
-                break;
-            case 'microphone_not_working':
-                userMessage = 'Microphone not working. Please check microphone permissions and try again.';
-                break;
-            case 'speech_recognition_not_supported':
-                userMessage = 'Speech recognition not supported in this browser. Please use Chrome, Firefox, or Safari.';
-                break;
-            case 'no_audio_stream':
-                userMessage = 'No audio stream available. Please grant microphone permissions.';
-                break;
-            default:
-                userMessage = 'Unknown issue with voice recognition. Please try refreshing the page.';
-        }
-        
-        alert(userMessage);
-    } else {
-        addDebugLog('Cannot diagnose - whisper module not loaded', 'WARN');
-    }
+    };
+    
+    addDebugLog('✅ Fallback speech recognition setup complete', 'INFO');
 }
 
-function toggleSpeech() {
-    addDebugLog(`Toggle speech called - current state: ${isSpeechEnabled}`, 'DEBUG');
-    isSpeechEnabled = !isSpeechEnabled;
-    const speechToggleBtn = document.getElementById('speech-toggle-btn');
-    if (speechToggleBtn) {
-        speechToggleBtn.textContent = `🔊 Speech: ${isSpeechEnabled ? 'ON' : 'OFF'}`;
-        speechToggleBtn.className = isSpeechEnabled ? 'speech-toggle-btn' : 'speech-toggle-btn off';
-        addDebugLog(`Speech output is now ${isSpeechEnabled ? 'enabled' : 'disabled'}`, 'INFO');
-    }
-}
-
-function trackRequest() {
-    const trackingNumber = document.getElementById('trackingNumber').value;
-    if (trackingNumber) {
-        document.getElementById('trackingResults').style.display = 'block';
-    } else {
-        alert('Please enter a tracking number.');
-    }
-}
-
-// Global functions for UI
-window.toggleListening = toggleListening;
-window.trackRequest = trackRequest;
-window.selectOrderForReturn = selectOrderForReturn;
-window.trackReturn = trackReturn;
-window.viewOrderDetails = viewOrderDetails;
+// Start the application when DOM is loaded
+document.addEventListener('DOMContentLoaded', initializeApp);

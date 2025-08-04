@@ -320,6 +320,13 @@ class WhisperModule {
             await this.init();
         }
         
+        // Force reset if there's a state mismatch
+        if (this.isRecording && !this._isLiveTranscribing) {
+            this.addDebugLog('State mismatch detected - forcing reset', 'WARN');
+            this.isRecording = false;
+            this._isLiveTranscribing = false;
+        }
+        
         // Check if already recording
         if (this.isRecording) {
             this.addDebugLog('Already recording - skipping start', 'WARN');
@@ -406,6 +413,10 @@ class WhisperModule {
     forceRestart() {
         this.addDebugLog('Force restarting voice recognition', 'INFO');
         
+        // Reset all states
+        this.isRecording = false;
+        this._isLiveTranscribing = false;
+        
         // Stop current recognition if active
         if (this.speechRecognition && this._isLiveTranscribing) {
             try {
@@ -414,6 +425,17 @@ class WhisperModule {
             } catch (e) {
                 this.addDebugLog('Failed to stop current recognition: ' + e.message, 'WARN');
             }
+        }
+        
+        // Stop audio stream if it exists
+        if (this.audioStream) {
+            try {
+                this.audioStream.getTracks().forEach(track => track.stop());
+                this.addDebugLog('Stopped audio stream for force restart', 'DEBUG');
+            } catch (e) {
+                this.addDebugLog('Failed to stop audio stream: ' + e.message, 'WARN');
+            }
+            this.audioStream = null;
         }
         
         // Reset state
@@ -433,6 +455,43 @@ class WhisperModule {
 
     get isLiveTranscribing() {
         return this._isLiveTranscribing;
+    }
+    
+    getStatus() {
+        return {
+            isInitialized: this.isInitialized,
+            isRecording: this.isRecording,
+            isLiveTranscribing: this._isLiveTranscribing,
+            hasAudioStream: !!this.audioStream,
+            hasSpeechRecognition: !!this.speechRecognition
+        };
+    }
+    
+    resetState() {
+        this.addDebugLog('Resetting WhisperModule state', 'INFO');
+        this.isRecording = false;
+        this._isLiveTranscribing = false;
+        
+        // Stop audio stream
+        if (this.audioStream) {
+            try {
+                this.audioStream.getTracks().forEach(track => track.stop());
+            } catch (e) {
+                this.addDebugLog('Failed to stop audio stream during reset: ' + e.message, 'WARN');
+            }
+            this.audioStream = null;
+        }
+        
+        // Stop speech recognition
+        if (this.speechRecognition) {
+            try {
+                this.speechRecognition.stop();
+            } catch (e) {
+                this.addDebugLog('Failed to stop speech recognition during reset: ' + e.message, 'WARN');
+            }
+        }
+        
+        this.addDebugLog('WhisperModule state reset completed', 'INFO');
     }
 
     async checkMicrophoneStatus() {
